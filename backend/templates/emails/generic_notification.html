@@ -1,0 +1,7 @@
+{% extends "emails/base_email.html" %}
+{% block content %}
+<h2 style="color:#39495b;margin-top:0;">{{ title }}</h2>
+<p>Bonjour {{ user.get_full_name|default:user.username }},</p>
+<p>{{ message }}</p>
+<p style="margin-top:24px;">L'équipe InnovEvent</p>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "emails/base_email.html" %}
+{% block content %}
+<h2 style="color:#39495b;margin-top:0;">Réservation confirmée</h2>
+<p>Bonjour {{ user.get_full_name|default:user.username }},</p>
+<p>
+  Votre paiement a été validé et votre réservation de <strong>{{ booking.resource }}</strong>
+  pour l'événement <strong>{{ booking.event.title }}</strong> est confirmée.
+</p>
+<table role="presentation" width="100%" style="border-collapse:collapse;margin:16px 0;font-size:13px;">
+  <tr>
+    <td style="padding:6px 0;color:#6f7780;">Période</td>
+    <td style="padding:6px 0;text-align:right;">{{ booking.start_datetime|date:"d/m/Y H:i" }} — {{ booking.end_datetime|date:"d/m/Y H:i" }}</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 0;color:#6f7780;">Référence</td>
+    <td style="padding:6px 0;text-align:right;">{{ booking.payment.transaction_ref }}</td>
+  </tr>
+</table>
+<p>Le reçu PDF est disponible dans votre espace InnovEvent-GS, rubrique « Réservations ».</p>
+<p style="margin-top:24px;">Merci de votre confiance,<br>L'équipe InnovEvent</p>
+{% endblock %}

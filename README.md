@@ -56,9 +56,13 @@ inutilisable (`set_unusable_password`) puisqu'il ne s'authentifie que via le fou
 cp backend/.env.example backend/.env      # renseigner les secrets
 cp frontend/.env.example frontend/.env    # optionnel en dev (Vite lit VITE_API_BASE_URL)
 docker compose up --build
-docker compose exec backend python manage.py createsuperuser   # optionnel si vous ne voulez pas des comptes de démo
-docker compose exec backend python manage.py seed_demo         # comptes + données de démonstration
+docker compose exec backend python manage.py createsuperuser
 ```
+
+La base démarre sans comptes ni données de démonstration. Créez le compte administrateur avec
+`createsuperuser` ; il pourra ensuite modifier son identifiant, son adresse email et son mot de
+passe depuis **Administration → Utilisateurs**. Les commandes `seed_*_demo` sont réservées aux
+environnements de démonstration et ne doivent pas être exécutées en production.
 
 Application accessible sur `http://localhost/`, API sur `http://localhost/api/v1/`, documentation
 Swagger sur `http://localhost/api/docs/`, admin Django sur `http://localhost/admin/`.

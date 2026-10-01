@@ -1,0 +1,18 @@
+{% extends "emails/base_email.html" %}
+{% block content %}
+<h2 style="color:#39495b;margin-top:0;">Vous êtes invité(e) !</h2>
+<p>Bonjour {{ participant.full_name|default:"" }},</p>
+<p>
+  Vous êtes cordialement invité(e) à participer à l'événement
+  <strong>« {{ event.title }} »</strong>, organisé le
+  {{ event.start_date|date:"d/m/Y à H:i" }}.
+</p>
+{% if event.description %}
+<div style="background:#f6e2e3;border-radius:8px;padding:14px 16px;margin:16px 0;font-size:13px;color:#39495b;">
+  {{ event.description }}
+</div>
+{% endif %}
+<p>Votre billet d'invitation, avec son QR code personnel, est joint à cet email — présentez-le à l'entrée le jour J.</p>
+<p>Nous espérons vous compter parmi nous.</p>
+<p style="margin-top:24px;">À bientôt,<br>L'équipe InnovEvent</p>
+{% endblock %}
