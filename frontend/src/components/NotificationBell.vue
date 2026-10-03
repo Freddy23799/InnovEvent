@@ -26,8 +26,12 @@ async function loadNotifications() {
 function wsUrl() {
   const token = localStorage.getItem("ie_access_token");
   if (!token) return null;
-  const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
-  const origin = apiBase.replace(/\/api\/v1\/?$/, "");
+  const apiBase = import.meta.env.VITE_API_BASE_URL || "/api/v1";
+  // Avec /api/v1, le WebSocket doit se raccrocher au domaine courant ;
+  // WebSocket n'accepte pas une URL relative seule.
+  const origin = apiBase.startsWith("/")
+    ? window.location.origin
+    : apiBase.replace(/\/api\/v1\/?$/, "");
   const wsOrigin = origin.replace(/^http/, "ws");
   return `${wsOrigin}/ws/notifications/?token=${encodeURIComponent(token)}`;
 }
