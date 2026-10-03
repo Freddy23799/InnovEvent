@@ -151,20 +151,20 @@ async function loadAll() {
   startHeroRotation();
 }
 
-// Galerie « Nos réalisations » : deux gros boutons (scope), puis un filtre par type
-// d'événement dérivé dynamiquement de ce que l'administrateur a publié dans ce scope.
-// Aucun prix ici — uniquement des photos, pour donner envie (les prix sont dans « Nos packs »).
+// Galerie « Nos réalisations » : toutes les photos publiques sont affichées
+// par défaut. Les filtres sont seulement des outils facultatifs de navigation,
+// jamais une condition qui peut masquer une réalisation importée.
 const SCOPES = [
+  { value: "tous", label: "Toutes les réalisations" },
   { value: "prive", label: "Événements privés" },
   { value: "public", label: "Événements grand public" },
 ];
-const activeScope = ref("prive");
-// Les photos importées avant l'ajout des deux scopes n'ont pas de valeur
-// `scope`. Elles restent visibles dans la galerie privée par défaut, au lieu
-// d'être invisibles derrière les boutons de filtre. L'administrateur peut
-// ensuite les reclasser depuis la photothèque.
+const activeScope = ref("tous");
+// Les photos historiques n'ont pas nécessairement de scope. Elles restent
+// visibles dans « Toutes les réalisations » et ne sont jamais considérées
+// comme privées au sens des permissions.
 const scopedPortfolio = computed(() => sections.portfolio.filter(
-  (item) => (item.scope || "prive") === activeScope.value
+  (item) => activeScope.value === "tous" || item.scope === activeScope.value
 ));
 
 const galleryFilters = computed(() => {

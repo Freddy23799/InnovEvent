@@ -5,6 +5,7 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.audit.views import HealthCheckView
+from apps.public.views import public_landing_media_file
 
 api_v1_patterns = [
     path("auth/", include("apps.accounts.urls")),
@@ -33,6 +34,9 @@ api_v1_patterns = [
 ]
 
 urlpatterns = [
+    # Fallback cPanel/Passenger : voir public_landing_media_file. Les autres
+    # fichiers media restent privés et ne sont jamais exposés par cette route.
+    path("media/landing/<path:path>", public_landing_media_file, name="public-landing-media-file"),
     path("admin/", admin.site.urls),
     path("health/", HealthCheckView.as_view(), name="healthcheck"),
     path("api/v1/", include(api_v1_patterns)),

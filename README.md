@@ -83,7 +83,10 @@ persistant dans les variables d'environnement du backend, par exemple
 dossier sous `MEDIA_URL=/media/`. Si le frontend et l'API sont sur deux domaines différents,
 utilisez une URL absolue, par exemple `MEDIA_URL=https://api.votre-domaine.example/media/`.
 Sans cette publication `/media/`, les photos téléversées existent sur le disque mais ne peuvent
-pas s'afficher dans le navigateur.
+pas s'afficher dans le navigateur. Les photos publiques de la page d'accueil
+(`/media/landing/...`) disposent aussi d'un fallback Django sécurisé sur
+cPanel/Passenger : elles restent accessibles même sans alias Apache, tandis
+que les documents privés ne sont pas exposés.
 
 Application accessible sur `http://localhost/`, API sur `http://localhost/api/v1/`, documentation
 Swagger sur `http://localhost/api/docs/`, admin Django sur `http://localhost/admin/`.

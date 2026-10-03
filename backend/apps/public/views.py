@@ -1,7 +1,9 @@
+import mimetypes
 from datetime import datetime, time
 from io import BytesIO
 
 from django.db import transaction
+from django.core.files.storage import default_storage
 from django.http import FileResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -12,6 +14,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.filters import OrderingFilter
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
+from django.views.decorators.http import require_GET
 
 from apps.accounts.permissions import IsAdminOrPublicReadOnly
 from apps.bookings.serializers import BookingSerializer
@@ -21,6 +24,33 @@ from apps.notifications.services import notify_booking_created
 from .models import LandingMedia, PackItem
 from .pdf import build_pack_preview_pdf
 from .serializers import LandingMediaSerializer, PackItemSerializer
+
+
+@require_GET
+def public_landing_media_file(request, path):
+    """Sert uniquement les photos publiques de la vitrine.
+
+    En Docker, Nginx sert normalement ``/media/``. Certains hébergements
+    cPanel/Passenger ne permettent pas de déclarer cet alias Apache : cette
+    route rend alors la photothèque publique disponible sans rendre publics
+    les documents sensibles téléversés ailleurs dans l'application (CNI,
+    permis, pièces jointes, etc.).
+    """
+    storage_name = f"landing/{path}"
+    if not LandingMedia.objects.filter(image=storage_name, is_active=True).exists():
+        from django.http import Http404
+
+        raise Http404("Média public introuvable.")
+
+    try:
+        file_handle = default_storage.open(storage_name, "rb")
+    except (FileNotFoundError, OSError):
+        from django.http import Http404
+
+        raise Http404("Fichier média introuvable.")
+
+    content_type = mimetypes.guess_type(storage_name)[0] or "application/octet-stream"
+    return FileResponse(file_handle, content_type=content_type)
 
 
 def _parse_selections(raw_selections):
