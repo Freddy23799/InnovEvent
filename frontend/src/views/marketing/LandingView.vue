@@ -159,7 +159,13 @@ const SCOPES = [
   { value: "public", label: "Événements grand public" },
 ];
 const activeScope = ref("prive");
-const scopedPortfolio = computed(() => sections.portfolio.filter((item) => item.scope === activeScope.value));
+// Les photos importées avant l'ajout des deux scopes n'ont pas de valeur
+// `scope`. Elles restent visibles dans la galerie privée par défaut, au lieu
+// d'être invisibles derrière les boutons de filtre. L'administrateur peut
+// ensuite les reclasser depuis la photothèque.
+const scopedPortfolio = computed(() => sections.portfolio.filter(
+  (item) => (item.scope || "prive") === activeScope.value
+));
 
 const galleryFilters = computed(() => {
   const tags = [...new Set(scopedPortfolio.value.map((item) => item.tag).filter(Boolean))];

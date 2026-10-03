@@ -133,7 +133,18 @@ class Command(BaseCommand):
                 media, created = LandingMedia.objects.get_or_create(
                     category=category,
                     label=label,
-                    defaults={"caption": caption, "price_label": price_label, "order": order, "is_active": True},
+                    defaults={
+                        "caption": caption,
+                        "price_label": price_label,
+                        # La sélection historique de la galerie est composée
+                        # de réceptions/cérémonies privées. Elle doit donc
+                        # apparaître immédiatement dans le premier filtre de
+                        # la page d'accueil, plutôt que d'être masquée faute
+                        # de scope renseigné.
+                        "scope": LandingMedia.Scope.PRIVE if category == LandingMedia.Category.REALISATION else "",
+                        "order": order,
+                        "is_active": True,
+                    },
                 )
                 if created:
                     with open(path, "rb") as f:
