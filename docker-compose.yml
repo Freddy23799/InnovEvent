@@ -27,7 +27,11 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      # Le contexte racine inclut la photothèque source versionnée ; elle est
+      # embarquée dans l'image backend pour initialiser proprement une base vide.
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     env_file:
       - ./backend/.env

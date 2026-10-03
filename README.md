@@ -56,13 +56,34 @@ inutilisable (`set_unusable_password`) puisqu'il ne s'authentifie que via le fou
 cp backend/.env.example backend/.env      # renseigner les secrets
 cp frontend/.env.example frontend/.env    # optionnel en dev (Vite lit VITE_API_BASE_URL)
 docker compose up --build
-docker compose exec backend python manage.py createsuperuser
 ```
 
-La base démarre sans comptes ni données de démonstration. Créez le compte administrateur avec
-`createsuperuser` ; il pourra ensuite modifier son identifiant, son adresse email et son mot de
-passe depuis **Administration → Utilisateurs**. Les commandes `seed_*_demo` sont réservées aux
-environnements de démonstration et ne doivent pas être exécutées en production.
+Au premier démarrage sur une base vide, le backend crée automatiquement un super-administrateur
+complet après les migrations. Renseignez impérativement `INITIAL_ADMIN_PASSWORD` (ainsi que les
+identifiants `INITIAL_ADMIN_*`) dans `backend/.env` avant un déploiement : le backend refuse de
+démarrer sans ce mot de passe tant qu'aucun super-administrateur actif n'existe. Les secrets ne
+sont jamais affichés dans les journaux. Une fois ce compte créé, les redémarrages ne le modifient
+pas. Il peut ensuite être administré dans **Administration → Utilisateurs**. Les commandes
+`seed_*_demo` sont réservées aux environnements de démonstration et ne doivent pas être exécutées
+en production.
+
+Les 30 photos de la vitrine sont intégrées au déploiement et sont importées automatiquement au
+premier démarrage uniquement si la photothèque est vide. PostgreSQL conserve les métadonnées et
+les chemins des médias ; les fichiers sont conservés durablement dans le volume Docker
+`backend_media`. Les images ajoutées ou supprimées depuis l'administration ne sont jamais
+écrasées au redémarrage.
+
+### Hébergement cPanel (sans Docker/Nginx)
+
+Sur cPanel, Nginx n'est généralement pas utilisé : le site Python est servi par Apache/Passenger.
+Les images et documents ne sont pas stockés dans PostgreSQL : ils sont déposés dans `MEDIA_ROOT`
+(par défaut `backend/media/`) et la base conserve leur chemin. Définissez un `MEDIA_ROOT`
+persistant dans les variables d'environnement du backend, par exemple
+`/home/VOTRE_COMPTE/innovevent/backend/media`, puis configurez Apache/cPanel pour publier ce
+dossier sous `MEDIA_URL=/media/`. Si le frontend et l'API sont sur deux domaines différents,
+utilisez une URL absolue, par exemple `MEDIA_URL=https://api.votre-domaine.example/media/`.
+Sans cette publication `/media/`, les photos téléversées existent sur le disque mais ne peuvent
+pas s'afficher dans le navigateur.
 
 Application accessible sur `http://localhost/`, API sur `http://localhost/api/v1/`, documentation
 Swagger sur `http://localhost/api/docs/`, admin Django sur `http://localhost/admin/`.

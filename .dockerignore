@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+dist.tar.gz
+
+backend/.env
+backend/.venv
+backend/venv
+backend/staticfiles
+backend/media
+backend/db.sqlite3
+backend/__pycache__
+
+frontend/node_modules
+frontend/dist
+frontend/.env

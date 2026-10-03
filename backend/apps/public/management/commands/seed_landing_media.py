@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from django.core.files import File
@@ -65,6 +66,32 @@ CURATION = {
 }
 
 
+def _normalised_filename(filename):
+    """Compare les noms fournis avec ceux exportés par WhatsApp.
+
+    Les fichiers sources gardent les espaces et les suffixes ``(1)`` de
+    WhatsApp, tandis que la curation utilisait des underscores (``_1``).
+    Ces graphies désignent la même photo : aucun renommage des originaux n'est
+    nécessaire pour les importer.
+    """
+    return re.sub(r"[\s_()]+", "", Path(filename).stem).casefold()
+
+
+def _find_source_file(photos_dir, expected_filename):
+    matches = [
+        path for path in photos_dir.iterdir()
+        if path.is_file() and _normalised_filename(path.name) == _normalised_filename(expected_filename)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise CommandError(
+            f"Plusieurs fichiers correspondent à {expected_filename!r} dans {photos_dir} : "
+            f"{', '.join(path.name for path in matches)}"
+        )
+    return None
+
+
 class Command(BaseCommand):
     """Attache la sélection curatée de photos réelles InnovEvent à la photothèque
     de la page d'accueil (LandingMedia), une par catégorie et son propre dossier
@@ -74,11 +101,23 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("base_dir", type=str, help="Dossier contenant les sous-dossiers deco/, formation/, gal/, accesoire/")
+        parser.add_argument(
+            "--if-empty",
+            action="store_true",
+            help="N'importe rien si la photothèque contient déjà au moins un média.",
+        )
 
     def handle(self, *args, **options):
         base_dir = Path(options["base_dir"])
         if not base_dir.is_dir():
             raise CommandError(f"Dossier introuvable : {base_dir}")
+
+        # Préserve la photothèque gérée depuis le back-office. L'initialisation
+        # automatique ne sert qu'à rendre une nouvelle base immédiatement
+        # présentable, jamais à rétablir des médias supprimés volontairement.
+        if options["if_empty"] and LandingMedia.objects.exists():
+            self.stdout.write("Photothèque déjà renseignée ; import initial ignoré.")
+            return
 
         created_count = 0
         for category, (subfolder, items) in CURATION.items():
@@ -86,8 +125,8 @@ class Command(BaseCommand):
             for order, item in enumerate(items):
                 filename, label, caption = item[0], item[1], item[2]
                 price_label = item[3] if len(item) > 3 else ""
-                path = photos_dir / filename
-                if not path.is_file():
+                path = _find_source_file(photos_dir, filename)
+                if path is None:
                     self.stdout.write(self.style.WARNING(f"Fichier manquant, ignoré : {subfolder}/{filename}"))
                     continue
 
@@ -98,7 +137,7 @@ class Command(BaseCommand):
                 )
                 if created:
                     with open(path, "rb") as f:
-                        media.image.save(filename, File(f), save=True)
+                        media.image.save(path.name, File(f), save=True)
                     created_count += 1
                     self.stdout.write(self.style.SUCCESS(f"Créé : [{category}] {label}"))
                 else:

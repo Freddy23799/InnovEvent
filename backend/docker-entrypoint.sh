@@ -19,6 +19,8 @@ except Exception:
 done
 
 python manage.py migrate --noinput
+python manage.py ensure_initial_admin
+python manage.py seed_landing_media /opt/innovevent-seed/acceuil --if-empty
 python manage.py collectstatic --noinput
 
 # Daphne (ASGI) plutôt que gunicorn (WSGI) : un seul processus sert à la fois

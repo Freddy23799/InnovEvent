@@ -137,10 +137,15 @@ TIME_ZONE = "Africa/Douala"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = os.environ.get("STATIC_URL", "/static/")
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# En Docker, le volume `backend_media` est monté sur ce dossier. Sur cPanel,
+# MEDIA_ROOT peut pointer vers un dossier persistant du compte d'hébergement ;
+# le serveur web (Apache/Passenger) doit publier MEDIA_URL vers ce dossier.
+# Les barres initiales garantissent que les URLs retournées par l'API sont
+# absolues (`/media/...`) et non relatives à une route `/api/...`.
+MEDIA_URL = os.environ.get("MEDIA_URL", "/media/")
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", BASE_DIR / "media"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
