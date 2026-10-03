@@ -1047,23 +1047,33 @@ onUnmounted(() => {
   transition: border-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
 }
 .site-header.is-scrolled { border-color: var(--stone-line); box-shadow: 0 6px 24px rgba(30, 42, 51, 0.06); }
-.nav-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px var(--gutter); max-width: 1200px; margin: 0 auto; }
+.nav-row {
+  /* Trois zones équilibrées : logo à gauche, navigation réellement centrée,
+     actions à droite. Les dix liens ne sont plus comprimés dans les 1200px
+     réservés au contenu éditorial de la page. */
+  display: grid; grid-template-columns: minmax(190px, 1fr) auto minmax(330px, 1fr);
+  align-items: center; gap: clamp(16px, 2vw, 32px); padding: 16px var(--gutter);
+  max-width: 1680px; margin: 0 auto;
+}
 .logo { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .logo-icon { height: 34px; width: auto; display: block; }
 .logo-word { font-family: var(--display); font-size: 1.28rem; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
 .logo-word .grp { color: var(--wine); text-transform: uppercase; font-size: 0.62em; letter-spacing: 0.14em; vertical-align: middle; margin-left: 4px; font-weight: 700; }
 .footer-brand .logo-word { color: #fff; }
 
-.nav-links { display: flex; align-items: center; gap: 26px; }
-.nav-links > a { font-size: 0.92rem; font-weight: 500; color: var(--ink-soft); padding: 4px 0; transition: color 0.2s; }
+.nav-links { display: flex; align-items: center; justify-self: center; gap: clamp(12px, 1.05vw, 22px); white-space: nowrap; }
+.nav-links > a { font-size: clamp(0.78rem, 0.78vw, 0.92rem); font-weight: 500; color: var(--ink-soft); padding: 4px 0; transition: color 0.2s; }
 .nav-links > a:hover { color: var(--wine); }
-.nav-actions { display: flex; align-items: center; gap: 14px; }
+.nav-actions { display: flex; align-items: center; justify-self: end; gap: 12px; white-space: nowrap; }
 .nav-toggle { display: none; width: 38px; height: 38px; border: 1px solid var(--stone-line); background: var(--paper); border-radius: 4px; align-items: center; justify-content: center; }
 .nav-toggle svg { width: 18px; height: 18px; }
 .nav-links-mobile-actions { display: none; }
 .nav-scrim { display: none; }
 
-@media (max-width: 1500px) {
+/* Sous 1650px, l'ensemble logo + dix liens + actions serait trop dense : le
+   panneau de navigation offre une lecture plus nette qu'une barre comprimée. */
+@media (max-width: 1650px) {
+  .nav-row { display: flex; justify-content: space-between; gap: 24px; max-width: 1200px; }
   .nav-links {
     position: fixed; inset: 0 0 0 auto; width: min(320px, 86vw); height: 100vh; height: 100dvh;
     background: var(--paper); flex-direction: column; align-items: flex-start; gap: 2px;
