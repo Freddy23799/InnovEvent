@@ -17,9 +17,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         user_model = get_user_model()
 
-        # Un compte doit être à la fois actif, staff et superuser : il peut ainsi
-        # administrer toutes les ressources via l'API et l'administration Django.
+        # Les permissions métier vérifient aussi le rôle applicatif. Un compte
+        # Django marqué superuser mais resté ``participant`` ne doit donc jamais
+        # satisfaire ce garde-fou : il faut explicitement un administrateur
+        # InnovEvent complet.
         if user_model.objects.filter(
+            role=user_model.Role.ADMIN,
             is_active=True,
             is_staff=True,
             is_superuser=True,
