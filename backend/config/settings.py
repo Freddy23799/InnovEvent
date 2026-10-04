@@ -325,10 +325,13 @@ SECURE_REFERRER_POLICY = "same-origin"
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 if not DEBUG:
-    # À activer uniquement derrière un reverse proxy de confiance qui remplace
-    # X-Forwarded-Proto. En production, le réseau doit empêcher l'accès direct
-    # public au backend qui contournerait ce proxy.
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # Passenger/cPanel fournit normalement HTTPS directement à Django. Un
+    # reverse proxy Docker/TLS peut, lui, transmettre X-Forwarded-Proto : on
+    # ne lui fait confiance que lorsqu'il est explicitement déclaré. Cela évite
+    # une boucle de redirection sur les hébergements cPanel qui n'envoient pas
+    # cet en-tête.
+    if os.environ.get("DJANGO_TRUST_X_FORWARDED_PROTO", "False") == "True":
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
