@@ -565,13 +565,6 @@ onUnmounted(() => {
             <p>Moments immersifs et activités sur-mesure à intégrer à votre événement — bientôt disponible.</p>
             <a href="#experiences" class="text-link">En savoir plus</a>
           </div>
-          <div class="pole-card" id="accessoire-card">
-            <div class="pole-card-photo" v-if="sections.equipment[0]?.photo"><img :src="sections.equipment[0].photo" :alt="sections.equipment[0].label" /></div>
-            <div class="pole-card-icon" v-else><i class="fa-solid fa-sliders"></i></div>
-            <h4>Location de matériel</h4>
-            <p>Chaises, chapiteaux, sonorisation et mobilier disponibles à la location.</p>
-            <a href="#location" class="text-link">Voir le matériel</a>
-          </div>
         </div>
       </div>
     </section>
