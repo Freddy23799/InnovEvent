@@ -260,14 +260,21 @@ onBeforeUnmount(() => {
               <i class="fa-solid fa-arrow-left"></i>
             </button>
             <span class="ie-online-dot" :class="{ online: isConversationOnline(activeConversation) }"></span>
-            {{ otherParticipants(activeConversation) }}
+            <div class="ie-thread-heading">
+              <span>{{ otherParticipants(activeConversation) }}</span>
+              <small v-if="activeConversation.is_admin_support" class="ie-support-status">
+                {{ activeConversation.human_handoff
+                  ? "Assistant en pause · l'administration peut répondre ici"
+                  : "Assistant InnovEvent disponible · un administrateur peut prendre le relais" }}
+              </small>
+            </div>
           </div>
           <div class="ie-thread-messages">
             <div
               v-for="msg in messages"
               :key="msg.id"
               class="ie-message-bubble"
-              :class="{ mine: msg.sender === auth.user?.id }"
+              :class="{ mine: msg.sender === auth.user?.id && !msg.is_automated, automated: msg.is_automated }"
             >
               <div class="ie-message-sender">{{ msg.sender_name }}</div>
 
@@ -342,10 +349,13 @@ onBeforeUnmount(() => {
 }
 .ie-thread { display: flex; flex-direction: column; }
 .ie-thread-header { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-bottom: 1px solid var(--ie-line); font-weight: 700; color: var(--ie-navy); }
+.ie-thread-heading { display: flex; flex-direction: column; gap: 2px; }
+.ie-support-status { color: var(--ie-muted); font-size: 11px; font-weight: 400; }
 .mobile-conversation-back { display: none; }
 .ie-thread-messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
 .ie-message-bubble { max-width: 70%; background: #eef0f2; border-radius: 12px; padding: 8px 12px; font-size: 13.5px; }
 .ie-message-bubble.mine { align-self: flex-end; background: var(--ie-red-soft); }
+.ie-message-bubble.automated { border: 1px solid var(--ie-line); }
 .ie-message-sender { font-size: 11px; font-weight: 700; color: var(--ie-muted); margin-bottom: 2px; }
 .ie-thread-input { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--ie-line); }
 .ie-thread-input .ie-input { flex: 1; }

@@ -6,6 +6,8 @@ from .crypto import decrypt_text, encrypt_text
 
 class Conversation(models.Model):
     participants = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="conversations")
+    is_admin_support = models.BooleanField(default=False)
+    human_handoff = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -54,6 +56,7 @@ class Message(models.Model):
     attachment_content_type = models.CharField(max_length=100, blank=True)
     attachment_type = models.CharField(max_length=10, choices=AttachmentType.choices, blank=True)
     attachment_size = models.PositiveIntegerField(null=True, blank=True, help_text="Taille d'origine en octets")
+    is_automated = models.BooleanField(default=False)
 
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

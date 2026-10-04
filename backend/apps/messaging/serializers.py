@@ -17,7 +17,7 @@ IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 
 class MessageSerializer(serializers.ModelSerializer):
-    sender_name = serializers.CharField(source="sender.get_full_name", read_only=True)
+    sender_name = serializers.SerializerMethodField()
     body = serializers.CharField(required=False, allow_blank=True, default="")
     attachment_url = serializers.SerializerMethodField()
 
@@ -26,11 +26,18 @@ class MessageSerializer(serializers.ModelSerializer):
         fields = [
             "id", "conversation", "sender", "sender_name", "body", "is_read", "created_at",
             "attachment_url", "attachment_name", "attachment_content_type", "attachment_type", "attachment_size",
+            "is_automated",
         ]
         read_only_fields = [
             "id", "sender", "is_read", "created_at",
             "attachment_url", "attachment_name", "attachment_content_type", "attachment_type", "attachment_size",
+            "is_automated",
         ]
+
+    def get_sender_name(self, obj):
+        if obj.is_automated:
+            return "Assistant InnovEvent"
+        return obj.sender.get_full_name() or obj.sender.username
 
     def get_attachment_url(self, obj):
         if not obj.attachment:
@@ -94,8 +101,11 @@ class ConversationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Conversation
-        fields = ["id", "participants", "participant_ids", "last_message", "unread_count", "created_at"]
-        read_only_fields = ["id", "created_at"]
+        fields = [
+            "id", "participants", "participant_ids", "last_message", "unread_count",
+            "is_admin_support", "human_handoff", "created_at",
+        ]
+        read_only_fields = ["id", "is_admin_support", "human_handoff", "created_at"]
 
     def get_participants(self, obj):
         return [

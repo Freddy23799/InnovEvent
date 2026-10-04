@@ -14,6 +14,7 @@ from apps.marketplace.models import ProfessionalProfile
 from apps.notifications.services import notify_new_message
 
 from .crypto import decrypt_bytes
+from .autoresponder import answer_support_message
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
 
@@ -47,6 +48,19 @@ class ConversationViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Aucun administrateur disponible pour le moment."}, status=status.HTTP_404_NOT_FOUND)
 
         conversation = Conversation.get_or_create_between(request.user, admin)
+        if not conversation.is_admin_support:
+            conversation.is_admin_support = True
+            # Une conversation déjà reprise par un humain reste en suivi humain.
+            conversation.human_handoff = conversation.messages.filter(sender=admin, is_automated=False).exists()
+            conversation.save(update_fields=["is_admin_support", "human_handoff"])
+        if not conversation.messages.exists():
+            welcome = Message(conversation=conversation, sender=admin, is_automated=True, is_read=True)
+            welcome.body = (
+                f"Bonjour {request.user.first_name or request.user.username} ! Je suis l'assistant InnovEvent. "
+                "Posez votre question sur une salle, une réservation, un devis, un paiement ou nos services. "
+                "Je répondrai si possible; sinon l'administration prendra le relais dans cette conversation."
+            )
+            welcome.save()
         serializer = self.get_serializer(conversation)
         return Response(serializer.data)
 
@@ -122,6 +136,41 @@ class MessageViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Vous ne participez pas à cette conversation.")
         message = serializer.save(sender=self.request.user)
         notify_new_message(message)
+
+        if not conversation.is_admin_support:
+            return
+
+        if self.request.user.is_admin_role:
+            if not conversation.human_handoff:
+                conversation.human_handoff = True
+                conversation.save(update_fields=["human_handoff"])
+            return
+
+        if conversation.human_handoff:
+            return
+
+        admin = conversation.participants.filter(role="admin", is_active=True).first()
+        if not admin:
+            return
+
+        prior_messages = conversation.messages.exclude(pk=message.pk).select_related("sender").order_by("-created_at")
+        history = [
+            ("assistant" if prior.is_automated or prior.sender.is_admin_role else "user", prior.body)
+            for prior in reversed(list(prior_messages[:24]))
+        ]
+        reply, handoff = answer_support_message(message.body, history=history)
+        if handoff:
+            conversation.human_handoff = True
+            conversation.save(update_fields=["human_handoff"])
+
+        automated_message = Message(
+            conversation=conversation,
+            sender=admin,
+            is_automated=True,
+            is_read=True,
+        )
+        automated_message.body = reply
+        automated_message.save()
 
     @action(detail=False, methods=["post"], url_path="mark-read")
     def mark_read(self, request):
