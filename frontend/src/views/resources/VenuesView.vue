@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import EmptyState from "../../components/EmptyState.vue";
 import SubscriptionCheckoutModal from "../../components/SubscriptionCheckoutModal.vue";
@@ -103,6 +103,12 @@ const submitting = ref(false);
 const errorMessage = ref("");
 const editingId = ref(null);
 const photoFile = ref(null);
+const photoPreviewUrl = ref("");
+
+function clearPhotoPreview() {
+  if (photoPreviewUrl.value.startsWith("blob:")) URL.revokeObjectURL(photoPreviewUrl.value);
+  photoPreviewUrl.value = "";
+}
 
 const emptyForm = {
   name: "", city: "", address: "", capacity: 0, price_per_day: 0, description: "", is_active: true,
@@ -218,6 +224,7 @@ function startCreate() {
   Object.assign(form, emptyForm);
   editingId.value = null;
   photoFile.value = null;
+  clearPhotoPreview();
   errorMessage.value = "";
   showForm.value = true;
 }
@@ -226,18 +233,25 @@ function startEdit(venue) {
   Object.assign(form, venue);
   editingId.value = venue.id;
   photoFile.value = null;
+  clearPhotoPreview();
+  photoPreviewUrl.value = venue.photo || "";
   errorMessage.value = "";
   showForm.value = true;
 }
 
 function onPhotoChange(e) {
-  photoFile.value = e.target.files[0] || null;
+  clearPhotoPreview();
+  photoFile.value = e.target.files?.[0] || null;
+  if (photoFile.value) photoPreviewUrl.value = URL.createObjectURL(photoFile.value);
 }
 
 function buildPayload() {
   // discount_valid_until est un DateField côté API : une chaîne vide est rejetée
   // (400), il faut soit null (JSON), soit omettre le champ (FormData).
   const base = { ...form, discount_valid_until: form.discount_valid_until || null };
+  // `photo` contient l'URL renvoyée par l'API en mode édition. Ne pas la renvoyer
+  // comme fichier : l'ImageField n'accepte que le nouveau fichier sélectionné.
+  delete base.photo;
   if (!photoFile.value) return base;
   const payload = new FormData();
   Object.entries(base).forEach(([key, value]) => {
@@ -274,6 +288,8 @@ async function deleteVenue(venue) {
   await loadVenues();
 }
 
+onUnmounted(clearPhotoPreview);
+
 onMounted(() => {
   loadVenues();
   loadVenuesAccess();
@@ -284,8 +300,10 @@ onMounted(() => {
   <div>
     <div class="ie-page-header">
       <div>
-        <h1><i class="fa-solid fa-building-columns" style="color: var(--ie-red); margin-right: 8px;"></i>Salles</h1>
-        <p class="ie-page-subtitle">Catalogue des salles disponibles pour vos événements.</p>
+        <h1><i class="fa-solid fa-building-columns" style="color: var(--ie-red); margin-right: 8px;"></i>{{ canManage ? "Catalogue des salles" : "Salles" }}</h1>
+        <p class="ie-page-subtitle">
+          {{ canManage ? "Ajoutez les salles et leurs photos pour les présenter dans le catalogue de réservation." : "Catalogue des salles disponibles pour vos événements." }}
+        </p>
       </div>
       <div class="ie-page-header-actions">
         <button class="ie-btn ie-btn-primary" type="button" @click="guidedTourOpen = true">
@@ -342,8 +360,17 @@ onMounted(() => {
         </div>
         <label class="ie-label" style="margin-top: 14px;">Description</label>
         <textarea v-model="form.description" class="ie-input" rows="3"></textarea>
-        <label class="ie-label" style="margin-top: 14px;">Photo</label>
-        <input type="file" accept="image/*" class="ie-input" @change="onPhotoChange" />
+        <label class="ie-label" style="margin-top: 14px;">Image du catalogue</label>
+        <div v-if="photoPreviewUrl" class="ie-venue-photo-preview">
+          <img :src="photoPreviewUrl" :alt="form.name || 'Aperçu de la salle'" />
+          <span>{{ photoFile ? "Nouvelle image sélectionnée" : "Image actuellement publiée" }}</span>
+        </div>
+        <div v-else class="ie-venue-photo-empty">
+          <i class="fa-solid fa-image"></i>
+          <span>Aucune image — ajoutez une photo pour illustrer cette salle dans le catalogue.</span>
+        </div>
+        <input type="file" accept="image/*" class="ie-input" style="margin-top: 8px;" @change="onPhotoChange" />
+        <p class="ie-field-hint">La photo est affichée sur la fiche de la salle visible aux clients.</p>
         <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:14px;">
           <input v-model="form.is_active" type="checkbox" /> Salle active (disponible aux réservations)
         </label>
@@ -515,6 +542,10 @@ onMounted(() => {
 .ie-guided-tour-whatsapp { background: #25d366; border-color: #25d366; color: #fff; }
 .ie-guided-tour-platform { min-height: 44px; }
 .ie-guided-tour-dialog .ie-guided-tour-hint { margin: 14px 0 0; font-size: 12px; }
+.ie-venue-photo-preview { display: flex; align-items: center; gap: 12px; margin-top: 8px; padding: 8px; border: 1px solid var(--ie-line); border-radius: 8px; color: var(--ie-muted); font-size: 12px; }
+.ie-venue-photo-preview img { width: 112px; height: 72px; border-radius: 5px; object-fit: cover; }
+.ie-venue-photo-empty { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 14px; border: 1px dashed var(--ie-line); border-radius: 8px; color: var(--ie-muted); font-size: 12px; }
+.ie-venue-photo-empty i { color: var(--ie-red); font-size: 20px; }
 .ie-catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
 .ie-catalog-card { overflow: hidden; display: flex; flex-direction: column; }
 .ie-catalog-photo {
