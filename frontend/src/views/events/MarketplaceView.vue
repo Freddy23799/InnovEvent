@@ -37,6 +37,23 @@ function minPrice(eventId) {
   return Math.min(...types.map((t) => Number(t.price)));
 }
 
+function quantityOptions(event) {
+  const form = formByEvent[event.id];
+  const selected = (ticketTypesByEvent[event.id] || []).find((ticket) => String(ticket.id) === String(form?.ticketType));
+  const available = Math.min(10, selected?.remaining_quota || 0);
+  return Array.from({ length: available }, (_, index) => index + 1);
+}
+
+function syncTicketSelection(event) {
+  const form = formByEvent[event.id];
+  const types = ticketTypesByEvent[event.id] || [];
+  if (!types.some((ticket) => String(ticket.id) === String(form.ticketType))) {
+    form.ticketType = types[0]?.id || "";
+  }
+  const selected = types.find((ticket) => String(ticket.id) === String(form.ticketType));
+  form.quantity = Math.min(form.quantity, Math.max(1, Math.min(10, selected?.remaining_quota || 1)));
+}
+
 function initForm(event) {
   const types = ticketTypesByEvent[event.id] || [];
   formByEvent[event.id] = {
@@ -52,6 +69,7 @@ function initForm(event) {
 
 function selectTicketType(event, ticketTypeId) {
   formByEvent[event.id].ticketType = ticketTypeId;
+  syncTicketSelection(event);
 }
 
 async function loadEvents() {
@@ -93,9 +111,17 @@ async function buyTicket(event) {
     purchaseSuccess[event.id] = "Paiement confirmé — votre billet est prêt dans « Mes billets ».";
     const { data } = await api.get("/tickets/types/marketplace/", { params: { event: event.id } });
     ticketTypesByEvent[event.id] = data.results || data;
+    syncTicketSelection(event);
   } catch (e) {
     const d = e?.response?.data;
     purchaseError[event.id] = d?.detail || d?.non_field_errors?.[0] || "L'achat a échoué.";
+    if ([400, 409].includes(e?.response?.status)) {
+      try {
+        const { data } = await api.get("/tickets/types/marketplace/", { params: { event: event.id } });
+        ticketTypesByEvent[event.id] = data.results || data;
+        syncTicketSelection(event);
+      } catch { /* Le message d'erreur de l'achat reste affiché. */ }
+    }
   } finally {
     purchasing.value = null;
   }
@@ -162,7 +188,8 @@ onMounted(loadEvents);
           </div>
 
           <template v-if="(ticketTypesByEvent[event.id] || []).length && formByEvent[event.id]">
-            <p v-if="purchaseSuccess[event.id]" class="ie-alert ie-alert-success" style="margin-top: 10px;">{{ purchaseSuccess[event.id] }}</p>
+          <p v-if="purchaseSuccess[event.id]" class="ie-alert ie-alert-success" style="margin-top: 10px;">{{ purchaseSuccess[event.id] }}</p>
+          <p v-if="purchaseError[event.id]" class="ie-alert ie-alert-danger" style="margin-top: 10px;">{{ purchaseError[event.id] }}</p>
             <form class="ie-market-form" @submit.prevent="buyTicket(event)">
               <select v-model="formByEvent[event.id].ticketType" class="ie-select">
                 <option value="" disabled>Choisir le type de billet</option>
@@ -173,7 +200,7 @@ onMounted(loadEvents);
 
               <div class="ie-form-row">
                 <select v-model.number="formByEvent[event.id].quantity" class="ie-select">
-                  <option v-for="n in 10" :key="n" :value="n">{{ n }} billet{{ n > 1 ? 's' : '' }}</option>
+                  <option v-for="n in quantityOptions(event)" :key="n" :value="n">{{ n }} billet{{ n > 1 ? 's' : '' }}</option>
                 </select>
                 <select v-model="formByEvent[event.id].paymentProvider" class="ie-select">
                   <option v-for="p in PAYMENT_PROVIDERS" :key="p.value" :value="p.value">{{ p.label }}</option>
@@ -186,8 +213,6 @@ onMounted(loadEvents);
               </div>
               <input v-model="formByEvent[event.id].email" type="email" class="ie-input" placeholder="Email" required />
               <input v-model="formByEvent[event.id].phone" class="ie-input" placeholder="Téléphone" required />
-
-              <p v-if="purchaseError[event.id]" class="ie-alert ie-alert-danger">{{ purchaseError[event.id] }}</p>
 
               <button class="ie-btn ie-btn-primary" type="submit" style="width: 100%;" :disabled="purchasing === event.id">
                 <i class="fa-solid fa-lock"></i> {{ purchasing === event.id ? "Traitement…" : "Commander ce billet" }}

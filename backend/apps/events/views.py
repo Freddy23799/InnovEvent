@@ -1,4 +1,10 @@
-from django.http import HttpResponse
+import mimetypes
+
+from django.core.files.storage import default_storage
+from django.core import signing
+from django.db.models import Q
+from django.http import FileResponse, Http404, HttpResponse
+from django.views.decorators.http import require_GET
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
@@ -17,6 +23,37 @@ from .serializers import (
     EventSerializer,
     EventTaskSerializer,
 )
+
+
+@require_GET
+def public_event_photo_file(request, path):
+    """Sert uniquement les photos d'événements publics ou visibles par leur propriétaire."""
+    storage_name = f"events/{path}"
+    event_photos = Event.objects.filter(photo=storage_name)
+    public_photos = event_photos.filter(status=Event.Status.PUBLISHED, is_public=True)
+    is_public_photo = public_photos.exists()
+    if not is_public_photo:
+        token = request.GET.get("token", "")
+        try:
+            signed_data = signing.loads(token, salt="innovevent.event-photo", max_age=3600)
+        except signing.BadSignature:
+            raise Http404("Photo d'événement introuvable.")
+        if signed_data.get("photo") != storage_name or not event_photos.exists():
+            raise Http404("Photo d'événement introuvable.")
+
+    try:
+        photo = default_storage.open(storage_name, "rb")
+    except (FileNotFoundError, OSError, ValueError):
+        raise Http404("Fichier photo introuvable.")
+
+    content_type = mimetypes.guess_type(storage_name)[0] or "application/octet-stream"
+    response = FileResponse(photo, content_type=content_type)
+    response["X-Content-Type-Options"] = "nosniff"
+    if is_public_photo:
+        response["Cache-Control"] = "public, max-age=3600"
+    else:
+        response["Cache-Control"] = "private, no-store"
+    return response
 
 
 class EventViewSet(viewsets.ModelViewSet):

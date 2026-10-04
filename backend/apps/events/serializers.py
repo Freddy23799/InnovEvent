@@ -1,6 +1,21 @@
+from django.core import signing
 from rest_framework import serializers
 
 from .models import Event, EventExpense, EventParticipant, EventTask
+
+
+class EventPhotoField(serializers.ImageField):
+    """Issue time-limited URLs so private event photos remain private."""
+
+    def to_representation(self, value):
+        if not value:
+            return None
+
+        token = signing.dumps({"photo": value.name}, salt="innovevent.event-photo")
+        url = f"{value.url}?token={token}"
+
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
 
 
 class EventTaskSerializer(serializers.ModelSerializer):
@@ -30,6 +45,7 @@ class EventExpenseSerializer(serializers.ModelSerializer):
 
 
 class EventSerializer(serializers.ModelSerializer):
+    photo = EventPhotoField(required=False, allow_null=True)
     organizer_name = serializers.CharField(source="organizer.get_full_name", read_only=True)
     venue_name = serializers.CharField(source="venue.name", read_only=True, default=None)
     venue_address = serializers.CharField(source="venue.address", read_only=True, default=None)

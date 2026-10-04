@@ -4,9 +4,17 @@ from .models import Ticket, TicketType
 
 
 class TicketTypeSerializer(serializers.ModelSerializer):
-    sold_count = serializers.IntegerField(read_only=True)
-    remaining_quota = serializers.IntegerField(read_only=True)
+    sold_count = serializers.SerializerMethodField()
+    remaining_quota = serializers.SerializerMethodField()
     event_title = serializers.CharField(source="event.title", read_only=True)
+
+    def get_sold_count(self, obj):
+        if hasattr(obj, "marketplace_sold_count"):
+            return obj.marketplace_sold_count
+        return obj.sold_count
+
+    def get_remaining_quota(self, obj):
+        return obj.quota - self.get_sold_count(obj)
 
     class Meta:
         model = TicketType
@@ -50,8 +58,9 @@ class TicketPurchaseSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         ticket_type = attrs["ticket_type"]
-        if not ticket_type.is_on_sale():
-            raise serializers.ValidationError("Ce billet n'est plus en vente ou le quota est épuisé.")
+        unavailability_reason = ticket_type.sale_unavailability_reason()
+        if unavailability_reason:
+            raise serializers.ValidationError(unavailability_reason)
         if attrs["quantity"] > ticket_type.remaining_quota:
             raise serializers.ValidationError(
                 f"Il ne reste que {ticket_type.remaining_quota} billet(s) disponible(s)."

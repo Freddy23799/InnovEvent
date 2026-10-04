@@ -54,7 +54,9 @@ export default defineConfig({
           {
             // Photos/médias uploadés (salles, prestataires, événements...) : rarement
             // modifiés après publication, donc servis depuis le cache en priorité.
-            urlPattern: ({ url }) => url.pathname.startsWith("/media/"),
+            // Les photos d'événements privés utilisent une URL signée et ne
+            // doivent pas être conservées dans le cache partagé du service worker.
+            urlPattern: ({ url }) => url.pathname.startsWith("/media/") && !url.pathname.startsWith("/media/events/"),
             handler: "CacheFirst",
             options: {
               cacheName: "innovevent-media",

@@ -33,9 +33,20 @@ class TicketType(models.Model):
     def remaining_quota(self):
         return self.quota - self.sold_count
 
+    def sale_unavailability_reason(self, now=None):
+        now = now or timezone.now()
+        if not self.is_active:
+            return "Ce billet est désactivé."
+        if now < self.sale_start:
+            return "La vente de ce billet n'a pas encore commencé."
+        if now > self.sale_end:
+            return "La vente de ce billet est terminée."
+        if self.remaining_quota <= 0:
+            return "Le quota de ce billet est épuisé."
+        return ""
+
     def is_on_sale(self):
-        now = timezone.now()
-        return self.is_active and self.sale_start <= now <= self.sale_end and self.remaining_quota > 0
+        return not self.sale_unavailability_reason()
 
 
 class Ticket(models.Model):

@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Count, F, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -76,8 +77,19 @@ class TicketTypeViewSet(viewsets.ModelViewSet):
     def marketplace(self, request):
         """Billets disponibles à l'achat, tous organisateurs confondus — accessible
         à tout utilisateur authentifié indépendamment de son propre rôle/événements."""
-        qs = TicketType.objects.select_related("event").filter(
-            is_active=True, event__status="published", event__is_public=True
+        now = timezone.now()
+        qs = TicketType.objects.select_related("event").annotate(
+            marketplace_sold_count=Count(
+                "tickets",
+                filter=Q(tickets__status__in=[Ticket.Status.VALID, Ticket.Status.USED]),
+            )
+        ).filter(
+            is_active=True,
+            sale_start__lte=now,
+            sale_end__gte=now,
+            event__status="published",
+            event__is_public=True,
+            quota__gt=F("marketplace_sold_count"),
         )
         event_id = request.query_params.get("event")
         if event_id:
@@ -133,6 +145,9 @@ class TicketPurchaseView(APIView):
 
         # Verrouille la ligne pour éviter une survente en cas d'achats concurrents.
         ticket_type = TicketType.objects.select_for_update().get(pk=ticket_type.pk)
+        unavailability_reason = ticket_type.sale_unavailability_reason()
+        if unavailability_reason:
+            return Response({"detail": unavailability_reason}, status=status.HTTP_409_CONFLICT)
         if quantity > ticket_type.remaining_quota:
             return Response({"detail": "Quota insuffisant."}, status=status.HTTP_409_CONFLICT)
 

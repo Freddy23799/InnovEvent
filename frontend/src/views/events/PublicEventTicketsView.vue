@@ -51,8 +51,27 @@ const minPrice = computed(() => {
   return Math.min(...ticketTypes.value.map((t) => Number(t.price)));
 });
 
+const quantityOptions = computed(() => {
+  const selected = ticketTypes.value.find((ticket) => String(ticket.id) === String(form.ticketType));
+  const available = Math.min(10, selected?.remaining_quota || 0);
+  return Array.from({ length: available }, (_, index) => index + 1);
+});
+
 function selectTicketType(id) {
   form.ticketType = id;
+  const selected = ticketTypes.value.find((ticket) => String(ticket.id) === String(id));
+  form.quantity = Math.min(form.quantity, Math.max(1, Math.min(10, selected?.remaining_quota || 1)));
+}
+
+async function reloadTicketTypes() {
+  const { data } = await api.get("/tickets/types/marketplace/", { params: { event: props.eventId } });
+  ticketTypes.value = data.results || data;
+  if (!ticketTypes.value.some((ticket) => String(ticket.id) === String(form.ticketType))) {
+    form.ticketType = ticketTypes.value[0]?.id || "";
+    form.quantity = 1;
+  } else {
+    selectTicketType(form.ticketType);
+  }
 }
 
 async function loadEvent() {
@@ -105,11 +124,13 @@ async function buyTicket() {
       buyer_phone: form.phone,
     });
     purchaseSuccess.value = "Paiement confirmé — votre billet est prêt dans « Mes billets ».";
-    const { data } = await api.get("/tickets/types/marketplace/", { params: { event: props.eventId } });
-    ticketTypes.value = data.results || data;
+    await reloadTicketTypes();
   } catch (e) {
     const d = e?.response?.data;
     purchaseError.value = d?.detail || d?.non_field_errors?.[0] || "L'achat a échoué.";
+    if ([400, 409].includes(e?.response?.status)) {
+      try { await reloadTicketTypes(); } catch { /* Le message d'erreur de l'achat reste affiché. */ }
+    }
   } finally {
     purchasing.value = false;
   }
@@ -163,7 +184,7 @@ onMounted(loadEvent);
           <form class="ie-ticket-form" @submit.prevent="buyTicket">
             <div class="ie-form-row">
               <select v-model.number="form.quantity" class="ie-select">
-                <option v-for="n in 10" :key="n" :value="n">{{ n }} billet{{ n > 1 ? 's' : '' }}</option>
+                <option v-for="n in quantityOptions" :key="n" :value="n">{{ n }} billet{{ n > 1 ? 's' : '' }}</option>
               </select>
               <select v-model="form.paymentProvider" class="ie-select">
                 <option v-for="p in PAYMENT_PROVIDERS" :key="p.value" :value="p.value">{{ p.label }}</option>
@@ -176,7 +197,6 @@ onMounted(loadEvent);
             <input v-model="form.email" type="email" class="ie-input" placeholder="Email" required />
             <input v-model="form.phone" class="ie-input" placeholder="Téléphone" required />
 
-            <p v-if="purchaseError" class="ie-alert ie-alert-danger">{{ purchaseError }}</p>
             <p v-if="!auth.isAuthenticated" class="ie-ticket-login-hint">
               <i class="fa-solid fa-circle-info"></i> Connexion requise pour finaliser l'achat — vous reviendrez directement ici après connexion.
             </p>
@@ -189,7 +209,8 @@ onMounted(loadEvent);
             </button>
           </form>
         </template>
-        <p v-else class="ie-empty-inline">Aucun billet disponible pour le moment.</p>
+        <p v-if="purchaseError" class="ie-alert ie-alert-danger">{{ purchaseError }}</p>
+        <p v-else-if="!ticketTypes.length" class="ie-empty-inline">Aucun billet disponible pour le moment.</p>
       </div>
     </div>
   </div>
