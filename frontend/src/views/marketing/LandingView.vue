@@ -573,25 +573,30 @@ onUnmounted(() => {
     <section class="section-pad showcase" id="homedesign">
       <div class="container">
         <div class="showcase-head" data-reveal>
-          <div class="section-head" style="margin-bottom: 0;">
-            <p class="kicker" id="design">Home &amp; Design</p>
+          <div class="showcase-copy">
+            <p class="kicker" id="design"><i class="fa-solid fa-sparkles" aria-hidden="true"></i> Home &amp; Design</p>
             <h2 class="h-section">Décoration &amp; scénographie</h2>
-            <p class="lede">Une sélection de réalisations gérée depuis l'administration : chaque photo est ajoutée, remplacée ou retirée par l'équipe InnovEvent.</p>
+            <p class="lede">Des inspirations sélectionnées pour donner une signature unique à votre événement.</p>
           </div>
-          <router-link :to="{ name: 'register', query: { role: 'client' } }" class="btn btn-ghost">Demander un devis déco</router-link>
+          <div class="showcase-actions">
+            <span class="showcase-count"><i class="fa-regular fa-images" aria-hidden="true"></i>{{ sections.deco.length }} réalisations</span>
+            <router-link :to="{ name: 'register', query: { role: 'client' } }" class="showcase-cta">
+              Demander un devis <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+            </router-link>
+          </div>
         </div>
         <div class="media-grid" data-reveal-group>
           <template v-if="loading.deco">
             <div v-for="i in 4" :key="i" class="media-card media-skeleton"></div>
           </template>
           <template v-else-if="sections.deco.length">
-            <div v-for="item in sections.deco" :key="item.id" class="media-card is-clickable" @click="openLightbox(item)">
+            <div v-for="item in sections.deco" :key="item.id" class="media-card is-clickable" role="button" tabindex="0" :aria-label="`Agrandir : ${item.label}`" @click="openLightbox(item)" @keydown.enter="openLightbox(item)" @keydown.space.prevent="openLightbox(item)">
               <div class="media-photo">
                 <img v-if="item.photo" :src="item.photo" :alt="item.label" />
                 <i v-else class="fa-solid fa-palette"></i>
-                <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
+                <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-up-right-and-down-left-from-center"></i><span>Voir le projet</span></span>
               </div>
-              <span class="media-label">{{ item.label }}</span>
+              <span class="media-label"><span>{{ item.label }}</span><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></span>
             </div>
           </template>
           <p v-else class="media-empty">Catalogue décoration bientôt en ligne.</p>
@@ -1308,10 +1313,42 @@ onUnmounted(() => {
 @keyframes land-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
 /* Showcase déco */
-.media-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.media-card { border-radius: 10px; overflow: hidden; background: var(--paper); border: 1px solid var(--stone-line); }
-.media-label { display: block; padding: 10px 12px; font-size: 0.86rem; font-weight: 600; color: var(--ink); }
-@media (max-width: 860px) { .media-grid { grid-template-columns: repeat(2, 1fr); } }
+.showcase {
+  position: relative; overflow: hidden;
+  background: radial-gradient(ellipse at 88% 4%, rgba(192, 39, 45, 0.075), transparent 34%), linear-gradient(180deg, #fbfcfd 0%, #f5f7f9 100%);
+}
+.showcase::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.28; background-image: radial-gradient(rgba(30, 42, 51, 0.16) 0.7px, transparent 0.7px); background-size: 20px 20px; mask-image: linear-gradient(90deg, transparent 35%, #000 100%); }
+.showcase > .container { position: relative; }
+.showcase-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; margin-bottom: 36px; }
+.showcase-copy { max-width: 650px; }
+.showcase-copy .kicker { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 7px 11px; border: 1px solid rgba(192, 39, 45, 0.16); border-radius: 999px; background: rgba(255, 255, 255, 0.78); font-size: 0.74rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.showcase-copy .kicker i { font-size: 11px; }
+.showcase-copy .h-section { margin-bottom: 10px; font-weight: 650; letter-spacing: -0.035em; }
+.showcase-copy .lede { max-width: 52ch; margin: 0; font-size: 0.98rem; line-height: 1.7; }
+.showcase-actions { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+.showcase-count { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
+.showcase-count i { color: var(--wine); }
+.showcase-cta { display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 14px 19px; border: 1px solid rgba(138, 14, 22, 0.16); border-radius: 10px; background: linear-gradient(135deg, var(--wine) 0%, var(--wine-dark) 100%); color: #fff; font-size: 0.88rem; font-weight: 700; white-space: nowrap; box-shadow: 0 8px 20px rgba(138, 14, 22, 0.18); transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease), filter 0.25s var(--ease); }
+.showcase-cta i { font-size: 12px; transition: transform 0.25s var(--ease); }
+.showcase-cta:hover, .showcase-cta:focus-visible { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(138, 14, 22, 0.25); filter: saturate(1.08); }
+.showcase-cta:hover i, .showcase-cta:focus-visible i { transform: translateX(3px); }
+.media-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.media-card { min-width: 0; border-radius: 14px; overflow: hidden; background: var(--paper); border: 1px solid rgba(30, 42, 51, 0.1); box-shadow: 0 3px 12px rgba(30, 42, 51, 0.035); transition: box-shadow 0.3s var(--ease), border-color 0.3s var(--ease); }
+.media-card.is-clickable { cursor: zoom-in; }
+.media-card.is-clickable:hover, .media-card.is-clickable:focus-visible { border-color: rgba(192, 39, 45, 0.3); box-shadow: 0 16px 34px rgba(30, 42, 51, 0.13); outline: none; }
+.media-photo { aspect-ratio: 1.38 / 1; background: #e9edf1; }
+.media-photo img { transition: transform 0.65s cubic-bezier(.2,.7,.2,1), filter 0.4s ease; }
+.media-card:hover .media-photo img, .media-card:focus-visible .media-photo img { transform: scale(1.055); }
+.media-label { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; font-size: 0.84rem; line-height: 1.4; font-weight: 650; color: var(--ink); }
+.media-label i { flex-shrink: 0; color: #98a1a9; font-size: 11px; transition: color 0.2s ease, transform 0.2s ease; }
+.media-card:hover .media-label i, .media-card:focus-visible .media-label i { color: var(--wine); transform: translate(2px, -2px); }
+.media-zoom { flex-direction: column; gap: 9px; background: linear-gradient(180deg, rgba(20, 24, 28, 0.08), rgba(20, 24, 28, 0.56)); font-size: 16px; }
+.media-zoom span { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em; }
+.media-card:hover .media-zoom { opacity: 1; }
+.media-empty { padding: 30px; border: 1px dashed rgba(30, 42, 51, 0.2); border-radius: 14px; background: rgba(255,255,255,.68); text-align: center; }
+@media (max-width: 1000px) { .media-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 860px) { .showcase-head { align-items: flex-start; flex-direction: column; gap: 22px; } .showcase-actions { width: 100%; justify-content: space-between; } .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .showcase-head { margin-bottom: 26px; } .showcase-actions { align-items: flex-start; flex-direction: column; gap: 12px; } .showcase-cta { width: 100%; } .media-grid { gap: 12px; } .media-card { border-radius: 11px; } .media-photo { aspect-ratio: 1 / 0.92; } .media-label { min-height: 56px; padding: 10px 11px; font-size: 0.76rem; } }
 
 /* Cliquable → agrandissement (lightbox) */
 .is-clickable, .media-photo.is-clickable { cursor: zoom-in; }
@@ -1555,5 +1592,6 @@ footer ul li a:hover { color: #fff; }
 @media (prefers-reduced-motion: reduce) {
   .ie-land :deep([data-reveal]), .ie-land :deep([data-reveal-group] > *) { transition-duration: 0.001ms; transition-delay: 0s !important; }
   .hero h1 em::after { transition-duration: 0.001ms; transition-delay: 0s !important; }
+  .showcase-cta, .showcase-cta i, .media-card, .media-photo img, .media-label i { transition-duration: 0.001ms !important; }
 }
 </style>

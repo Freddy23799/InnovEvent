@@ -112,16 +112,31 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-DATABASES = {
-    "default": {
+_primary_database = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.environ.get("POSTGRES_DB", "innovevent"),
         "USER": os.environ.get("POSTGRES_USER", "innovevent"),
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
         "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-    }
+        "CONN_MAX_AGE": int(os.environ.get("POSTGRES_CONN_MAX_AGE", "60")),
 }
+DATABASES = {"default": _primary_database}
+
+# Réplique PostgreSQL en lecture seule, fournie par l'hébergeur (streaming ou
+# service managé). Elle est activée uniquement quand son hôte est configuré.
+# Les écritures et migrations restent toujours sur la base primaire.
+POSTGRES_REPLICA_HOST = os.environ.get("POSTGRES_REPLICA_HOST", "").strip()
+if POSTGRES_REPLICA_HOST:
+    DATABASES["replica"] = {
+        **_primary_database,
+        "HOST": POSTGRES_REPLICA_HOST,
+        "PORT": os.environ.get("POSTGRES_REPLICA_PORT", _primary_database["PORT"]),
+        "USER": os.environ.get("POSTGRES_REPLICA_USER", _primary_database["USER"]),
+        "PASSWORD": os.environ.get("POSTGRES_REPLICA_PASSWORD", _primary_database["PASSWORD"]),
+        "CONN_MAX_AGE": int(os.environ.get("POSTGRES_REPLICA_CONN_MAX_AGE", "60")),
+    }
+    DATABASE_ROUTERS = ["config.database_router.PrimaryReplicaRouter"]
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -163,6 +178,8 @@ CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
+        "TIMEOUT": int(os.environ.get("CACHE_DEFAULT_TIMEOUT", "300")),
+        "KEY_PREFIX": os.environ.get("CACHE_KEY_PREFIX", "innovevent"),
         "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
     }
 }
