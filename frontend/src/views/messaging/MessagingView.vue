@@ -178,6 +178,14 @@ onMounted(async () => {
     const target = conversations.value.find((c) => c.id === conversationId);
     if (target) await openConversation(target);
     router.replace({ query: {} });
+  } else if (route.query.guided_tour === "1") {
+    try {
+      await contactAdmin();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Impossible d'ouvrir la messagerie pour le moment.");
+    } finally {
+      router.replace({ query: {} });
+    }
   }
 
   pollHandle = setInterval(async () => {

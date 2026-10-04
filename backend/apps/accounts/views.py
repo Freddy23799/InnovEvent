@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from rest_framework.decorators import action
 
@@ -29,6 +29,34 @@ from .serializers import (
     UserSerializer,
 )
 User = get_user_model()
+
+REFRESH_COOKIE_NAME = "ie_refresh"
+REFRESH_COOKIE_PATH = "/api/v1/auth/"
+
+
+def set_refresh_cookie(response, token):
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        token,
+        max_age=int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="Lax",
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
+def clear_refresh_cookie(response):
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        "",
+        max_age=0,
+        expires="Thu, 01 Jan 1970 00:00:00 GMT",
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="Lax",
+        path=REFRESH_COOKIE_PATH,
+    )
 
 
 FAILED_LOGIN_MAX_ATTEMPTS = 5
@@ -85,6 +113,37 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
         if identifier and response.status_code == 200:
             cache.delete(_login_attempts_key(identifier))
+            refresh_token = response.data.pop("refresh", None)
+            if refresh_token:
+                set_refresh_cookie(response, refresh_token)
+        return response
+
+
+class CookieTokenRefreshView(TokenRefreshView):
+    """Renouvelle le JWT depuis le cookie HttpOnly, sans exposer le refresh au JS."""
+
+    def post(self, request, *args, **kwargs):
+        # Les appels du navigateur portent cet en-tête personnalisé. Il impose
+        # un preflight CORS pour les requêtes cross-origin, refusé aux origines
+        # qui ne sont pas explicitement autorisées.
+        if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+            return Response({"detail": "Requête de renouvellement refusée."}, status=status.HTTP_403_FORBIDDEN)
+        refresh_token = request.COOKIES.get(REFRESH_COOKIE_NAME)
+        if not refresh_token:
+            return Response({"detail": "Session expirée."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = self.get_serializer(data={"refresh": refresh_token})
+        serializer.is_valid(raise_exception=True)
+        response = Response(serializer.validated_data, status=status.HTTP_200_OK)
+        rotated_refresh = response.data.pop("refresh", None)
+        if rotated_refresh:
+            set_refresh_cookie(response, rotated_refresh)
+        return response
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if response.status_code == status.HTTP_401_UNAUTHORIZED:
+            clear_refresh_cookie(response)
         return response
 
 
@@ -136,7 +195,9 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        refresh_token = request.data.get("refresh")
+        refresh_token = request.COOKIES.get(REFRESH_COOKIE_NAME) or request.data.get("refresh")
+        if request.COOKIES.get(REFRESH_COOKIE_NAME) and request.headers.get("X-Requested-With") != "XMLHttpRequest":
+            return Response({"detail": "Requête de déconnexion refusée."}, status=status.HTTP_403_FORBIDDEN)
         if not refresh_token:
             return Response({"detail": "Le champ 'refresh' est requis."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -144,7 +205,9 @@ class LogoutView(APIView):
             token.blacklist()
         except Exception:
             return Response({"detail": "Token invalide ou déjà expiré."}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(status=status.HTTP_205_RESET_CONTENT)
+        response = Response(status=status.HTTP_205_RESET_CONTENT)
+        clear_refresh_cookie(response)
+        return response
 
 
 class MeView(generics.RetrieveUpdateAPIView):

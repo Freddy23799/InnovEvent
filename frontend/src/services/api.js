@@ -1,14 +1,15 @@
 import axios from "axios";
+import { getAccessToken, setAccessToken } from "./authToken";
 
 // En production l'API est publiée derrière le même domaine que le frontend.
 // Une URL relative évite qu'un build oublié tente d'appeler le localhost du
 // visiteur, ce qui rendrait l'application vide hors environnement local.
 const baseURL = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
-const api = axios.create({ baseURL });
+const api = axios.create({ baseURL, withCredentials: true });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("ie_access_token");
+  const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -18,8 +19,8 @@ api.interceptors.request.use((config) => {
 let isRefreshing = false;
 let pendingRequests = [];
 
-function resolvePending(token) {
-  pendingRequests.forEach((cb) => cb(token));
+function resolvePending(token, error = null) {
+  pendingRequests.forEach((callback) => callback(token, error));
   pendingRequests = [];
 }
 
@@ -31,16 +32,19 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    const refreshToken = localStorage.getItem("ie_refresh_token");
-    if (!refreshToken) {
+    if (!getAccessToken() || String(config.url || "").includes("/auth/refresh/")) {
       return Promise.reject(error);
     }
 
     config._retried = true;
 
     if (isRefreshing) {
-      return new Promise((resolve) => {
-        pendingRequests.push((token) => {
+      return new Promise((resolve, reject) => {
+        pendingRequests.push((token, refreshError) => {
+          if (refreshError) {
+            reject(refreshError);
+            return;
+          }
           config.headers.Authorization = `Bearer ${token}`;
           resolve(api(config));
         });
@@ -49,14 +53,17 @@ api.interceptors.response.use(
 
     isRefreshing = true;
     try {
-      const { data } = await axios.post(`${baseURL}/auth/refresh/`, { refresh: refreshToken });
-      localStorage.setItem("ie_access_token", data.access);
+      const { data } = await axios.post(`${baseURL}/auth/refresh/`, {}, {
+        withCredentials: true,
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      setAccessToken(data.access);
       resolvePending(data.access);
       config.headers.Authorization = `Bearer ${data.access}`;
       return api(config);
     } catch (refreshError) {
-      localStorage.removeItem("ie_access_token");
-      localStorage.removeItem("ie_refresh_token");
+      resolvePending(null, refreshError);
+      setAccessToken(null);
       window.location.href = "/login";
       return Promise.reject(refreshError);
     } finally {

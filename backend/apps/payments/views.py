@@ -1,6 +1,7 @@
 import hmac
 
 from django.conf import settings
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -91,32 +92,35 @@ class BasePaymentWebhookView(APIView):
             return Response({"detail": "Non autorisé."}, status=403)
 
         transaction_ref = request.data.get("transaction_ref")
-        payment = Payment.objects.filter(transaction_ref=transaction_ref, provider=self.provider).first()
-        log_action(
-            action=f"payment.webhook.{self.provider}",
-            ip_address=get_client_ip(request),
-            metadata={"transaction_ref": transaction_ref, "status": request.data.get("status")},
-        )
-        if not payment:
-            return Response({"detail": "Référence de transaction inconnue."}, status=404)
-
-        if payment.status != Payment.Status.PENDING:
-            # Déjà dans un état terminal — un rejeu du même webhook (ou un
-            # appel tardif après une mise à jour manuelle) ne doit jamais
-            # redéclencher les effets de bord (parrainage, commissions).
-            return Response({"detail": "Paiement déjà traité — aucune action."})
-
         event_status = request.data.get("status")
-        if event_status == "completed":
-            payment.status = Payment.Status.COMPLETED
-            payment.completed_at = timezone.now()
-        elif event_status == "failed":
-            payment.status = Payment.Status.FAILED
-            payment.failure_reason = request.data.get("reason", "")
-        else:
+        if event_status not in {"completed", "failed"}:
             return Response({"detail": "Statut d'événement inconnu."}, status=400)
-        payment.raw_response = request.data
-        payment.save()
+
+        # Le verrou empêche deux livraisons simultanées du même webhook de
+        # passer toutes deux le contrôle PENDING avant que l'une ne sauvegarde.
+        with transaction.atomic():
+            payment = Payment.objects.select_for_update().filter(
+                transaction_ref=transaction_ref, provider=self.provider
+            ).first()
+            if not payment:
+                return Response({"detail": "Référence de transaction inconnue."}, status=404)
+
+            log_action(
+                action=f"payment.webhook.{self.provider}",
+                ip_address=get_client_ip(request),
+                metadata={"transaction_ref": transaction_ref, "status": event_status},
+            )
+            if payment.status != Payment.Status.PENDING:
+                return Response({"detail": "Paiement déjà traité — aucune action."})
+
+            if event_status == "completed":
+                payment.status = Payment.Status.COMPLETED
+                payment.completed_at = timezone.now()
+            else:
+                payment.status = Payment.Status.FAILED
+                payment.failure_reason = request.data.get("reason", "")
+            payment.raw_response = request.data
+            payment.save()
         return Response({"detail": "Webhook traité."})
 
 

@@ -43,8 +43,8 @@ services:
     volumes:
       - backend_static:/app/staticfiles
       - backend_media:/app/media
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
 
   frontend:
     build:
@@ -64,7 +64,8 @@ services:
       - backend
       - frontend
     ports:
-      - "80:80"
+      # Port 80 est utilisé par le serveur web local de la machine.
+      - "8081:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - backend_static:/var/www/static:ro

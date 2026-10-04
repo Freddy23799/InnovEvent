@@ -1,11 +1,16 @@
-import { jwtDecode } from "../utils/jwt";
 import { defineStore } from "pinia";
 import api from "../services/api";
+import { setAccessToken } from "../services/authToken";
+
+// Supprime les anciens JWT persistés par les versions antérieures de l'app.
+if (typeof localStorage !== "undefined") {
+  localStorage.removeItem("ie_access_token");
+  localStorage.removeItem("ie_refresh_token");
+}
 
 export const useAuthStore = defineStore("auth", {
   state: () => ({
-    accessToken: localStorage.getItem("ie_access_token") || null,
-    refreshToken: localStorage.getItem("ie_refresh_token") || null,
+    accessToken: null,
     user: null,
     role: null,
   }),
@@ -15,7 +20,7 @@ export const useAuthStore = defineStore("auth", {
   actions: {
     async login(username, password) {
       const { data } = await api.post("/auth/login/", { username, password });
-      this._setTokens(data.access, data.refresh);
+      this._setTokens(data.access);
       await this.fetchMe();
     },
     async register(payload) {
@@ -28,34 +33,38 @@ export const useAuthStore = defineStore("auth", {
     },
     async logout() {
       try {
-        if (this.refreshToken) {
-          await api.post("/auth/logout/", { refresh: this.refreshToken });
-        }
+        await api.post("/auth/logout/", {}, { headers: { "X-Requested-With": "XMLHttpRequest" } });
       } catch (e) {
         // best-effort : le token expirera de toute façon côté serveur
       }
       this.accessToken = null;
-      this.refreshToken = null;
       this.user = null;
       this.role = null;
-      localStorage.removeItem("ie_access_token");
-      localStorage.removeItem("ie_refresh_token");
+      setAccessToken(null);
     },
     async restoreSession() {
-      if (!this.accessToken) return;
       try {
+        const { data } = await api.post("/auth/refresh/", {}, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+        this._setTokens(data.access);
         await this.fetchMe();
       } catch (e) {
-        await this.logout();
+        this.accessToken = null;
+        this.user = null;
+        this.role = null;
+        setAccessToken(null);
       }
     },
-    _setTokens(access, refresh) {
+    _setTokens(access) {
       this.accessToken = access;
-      this.refreshToken = refresh;
-      localStorage.setItem("ie_access_token", access);
-      localStorage.setItem("ie_refresh_token", refresh);
-      const payload = jwtDecode(access);
-      this.role = payload?.role || null;
+      setAccessToken(access);
     },
   },
 });
+
+if (typeof window !== "undefined") {
+  window.addEventListener("ie-access-token-changed", (event) => {
+    useAuthStore().accessToken = event.detail;
+  });
+}

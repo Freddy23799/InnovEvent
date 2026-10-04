@@ -72,6 +72,7 @@ async function checkTalentProfile() {
 const actorsFeaturesRef = computed(() => marketplaceAccess.actorsFeatures);
 const { isVisible: isActorGroupVisible, isLocked: isActorGroupLocked } = useFeatureFlags(actorsFeaturesRef);
 const hasProfileMarketplaceSubscription = computed(() => marketplaceAccess.hasProfileMarketplaceSubscription);
+const hasVenueMarketplaceSubscription = computed(() => marketplaceAccess.activeProfileSubscriptionTypes.has("venues"));
 
 // Un groupe dépliable par catégorie de métiers (10 au total), plutôt qu'un
 // seul groupe « Marketplace des acteurs » avec les 42 métiers à plat — trop
@@ -110,6 +111,7 @@ const navSections = computed(() => {
         ],
       },
       { type: "link", label: "Consulter équipements", to: { name: "equipment-catalog" }, icon: "fa-solid fa-sliders" },
+      { type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" },
       { type: "link", label: "Fournisseurs", to: { name: "providers-manage" }, icon: "fa-solid fa-handshake" },
       {
         type: "group", label: "Marketplaces Premium", icon: "fa-solid fa-crown", children: [
@@ -185,6 +187,9 @@ const navSections = computed(() => {
       { type: "link", label: "Mon événement", to: { name: "events" }, icon: "fa-solid fa-calendar-week" },
       { type: "link", label: "Réservations", to: { name: "bookings" }, icon: "fa-solid fa-calendar-check" },
       { type: "link", label: "Consulter équipements", to: { name: "equipment-catalog" }, icon: "fa-solid fa-sliders" },
+      ...(hasVenueMarketplaceSubscription.value
+        ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
+        : []),
       { type: "link", label: "Marché des événements", to: { name: "marketplace" }, icon: "fa-solid fa-store" },
       { type: "link", label: "Marketplace InnovEvent", to: { name: "premium-marketplace" }, icon: "fa-solid fa-crown" },
       ...actorsMarketplaceSections.value,
@@ -211,6 +216,9 @@ const navSections = computed(() => {
       { type: "link", label: "Marché des événements", to: { name: "marketplace" }, icon: "fa-solid fa-store" },
       { type: "link", label: "Réservations", to: { name: "bookings" }, icon: "fa-solid fa-calendar-check" },
       { type: "link", label: "Consulter équipements", to: { name: "equipment-catalog" }, icon: "fa-solid fa-sliders" },
+      ...(hasVenueMarketplaceSubscription.value
+        ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
+        : []),
       { type: "link", label: "Marketplace InnovEvent", to: { name: "premium-marketplace" }, icon: "fa-solid fa-crown" },
       ...actorsMarketplaceSections.value,
       { type: "link", label: "Paiements", to: { name: "payments" }, icon: "fa-solid fa-credit-card" },
@@ -224,6 +232,9 @@ const navSections = computed(() => {
       { type: "link", label: "Dashboard", to: { name: "dashboard" }, icon: "fa-solid fa-gauge-high" },
       { type: "link", label: "Billets", to: { name: "marketplace" }, icon: "fa-solid fa-store" },
       { type: "link", label: "Mes billets", to: { name: "my-tickets" }, icon: "fa-solid fa-ticket" },
+      ...(hasVenueMarketplaceSubscription.value
+        ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
+        : []),
       { type: "link", label: "Attestations & badges", to: { name: "attestations" }, icon: "fa-solid fa-certificate" },
       { type: "link", label: "Mes livraisons", to: { name: "my-deliveries" }, icon: "fa-solid fa-truck-fast" },
       ...(hasDriverProfile.value
@@ -238,6 +249,9 @@ const navSections = computed(() => {
     if (hasTalentProfile.value) {
       return [
         { type: "link", label: "Missions disponibles", to: { name: "talent-missions" }, icon: "fa-solid fa-briefcase" },
+        ...(hasVenueMarketplaceSubscription.value
+          ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
+          : []),
         { type: "link", label: "Marketplace InnovEvent", to: { name: "premium-marketplace" }, icon: "fa-solid fa-store" },
         { type: "link", label: "Mon profil talent", to: { name: "talent-profile" }, icon: "fa-solid fa-star" },
         { type: "link", label: "Messagerie", to: { name: "messaging" }, icon: "fa-solid fa-comments", badge: unreadMessages.value },
@@ -249,6 +263,9 @@ const navSections = computed(() => {
       { type: "link", label: "Demandes de devis reçues", to: { name: "provider-quote-requests" }, icon: "fa-solid fa-file-invoice" },
       { type: "link", label: "Mes disponibilités", to: { name: "provider-availability" }, icon: "fa-solid fa-calendar-check" },
       { type: "link", label: "Mes livraisons", to: { name: "my-deliveries" }, icon: "fa-solid fa-truck-fast" },
+      ...(hasVenueMarketplaceSubscription.value
+        ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
+        : []),
       ...(hasDriverProfile.value
         ? [{ type: "link", label: "Mon profil chauffeur", to: { name: "driver-profile" }, icon: "fa-solid fa-id-card" }]
         : []),
@@ -280,6 +297,9 @@ const navSections = computed(() => {
     { type: "link", label: "Dashboard", to: { name: "dashboard" }, icon: "fa-solid fa-gauge-high" },
     { type: "link", label: "Billets", to: { name: "marketplace" }, icon: "fa-solid fa-store" },
     { type: "link", label: "Mes billets", to: { name: "my-tickets" }, icon: "fa-solid fa-ticket" },
+    ...(hasVenueMarketplaceSubscription.value
+      ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
+      : []),
     { type: "link", label: "Jeux", to: { name: "games" }, icon: "fa-solid fa-gamepad" },
     { type: "link", label: "Parrainage", to: { name: "referral" }, icon: "fa-solid fa-user-plus" },
     { type: "link", label: "Messagerie", to: { name: "messaging" }, icon: "fa-solid fa-comments", badge: unreadMessages.value },
@@ -331,9 +351,7 @@ async function handleLogout() {
 onMounted(() => {
   loadUnreadMessages();
   pollHandle = setInterval(loadUnreadMessages, 30000);
-  if (["admin", "client", "organizer"].includes(auth.role)) {
-    marketplaceAccess.refresh();
-  }
+  marketplaceAccess.refresh();
   if (auth.role === "partner") {
     checkCarrierProfile();
     checkCompanyProfile();

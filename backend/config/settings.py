@@ -226,6 +226,9 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+# Autorise les cookies d'authentification uniquement depuis les origines
+# explicitement listées ci-dessus (jamais avec une origine générique `*`).
+CORS_ALLOW_CREDENTIALS = True
 
 # --- Emails transactionnels --------------------------------------------------
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
@@ -248,7 +251,10 @@ if DEBUG and not EMAIL_HOST_PASSWORD:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # --- Paiements & IA (secrets, jamais exposés au frontend) -------------------
-PAYMENTS_DEMO_MODE = os.environ.get("PAYMENTS_DEMO_MODE", "True") == "True"
+# Les paiements simulés sont activés par défaut uniquement en développement.
+# Une production sans configuration de passerelle échoue ainsi de façon fermée
+# au lieu de présenter un paiement fictif comme encaissé.
+PAYMENTS_DEMO_MODE = os.environ.get("PAYMENTS_DEMO_MODE", str(DEBUG)) == "True"
 # Secret partagé attendu sur chaque webhook entrant (en-tête X-Webhook-Secret) —
 # faute d'un identifiant marchand réel par fournisseur pour l'instant, c'est le
 # seul moyen de s'assurer qu'un appel provient bien du serveur de paiement et
@@ -302,6 +308,10 @@ SECURE_REFERRER_POLICY = "same-origin"
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 if not DEBUG:
+    # À activer uniquement derrière un reverse proxy de confiance qui remplace
+    # X-Forwarded-Proto. En production, le réseau doit empêcher l'accès direct
+    # public au backend qui contournerait ce proxy.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True

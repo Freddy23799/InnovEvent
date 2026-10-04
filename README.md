@@ -58,6 +58,14 @@ cp frontend/.env.example frontend/.env    # optionnel en dev (Vite lit VITE_API_
 docker compose up --build
 ```
 
+Le fichier `backend/.env.example` est réglé pour un déploiement derrière HTTPS.
+Pour un lancement local en HTTP, mettez `DJANGO_DEBUG=True` et ajoutez
+`http://localhost:5173` à `CORS_ALLOWED_ORIGINS` si le frontend Vite appelle
+directement l'API. Pour les paiements simulés locaux, mettez aussi
+`PAYMENTS_DEMO_MODE=True`. Avant toute mise en production, remettez `DJANGO_DEBUG=False`,
+`PAYMENTS_DEMO_MODE=False` et configurez l'ingress HTTPS décrit dans
+[`SECURITY.md`](SECURITY.md). Le proxy Nginx fourni ne termine pas TLS.
+
 Au premier démarrage sur une base vide, le backend crée automatiquement un super-administrateur
 complet après les migrations. Renseignez impérativement `INITIAL_ADMIN_PASSWORD` (ainsi que les
 identifiants `INITIAL_ADMIN_*`) dans `backend/.env` avant un déploiement : le backend refuse de

@@ -2,8 +2,10 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import api from "../services/api";
+import { useAuthStore } from "../stores/auth";
 
 const router = useRouter();
+const auth = useAuthStore();
 const notifications = ref([]);
 const open = ref(false);
 const live = ref(false); // true dès que le flux temps réel (WebSocket) est connecté
@@ -24,7 +26,7 @@ async function loadNotifications() {
 }
 
 function wsUrl() {
-  const token = localStorage.getItem("ie_access_token");
+  const token = auth.accessToken;
   if (!token) return null;
   const apiBase = import.meta.env.VITE_API_BASE_URL || "/api/v1";
   // Avec /api/v1, le WebSocket doit se raccrocher au domaine courant ;
@@ -61,7 +63,7 @@ function connectRealtime() {
     // Reconnexion automatique (ex: réseau coupé, backend redémarré) tant que le
     // composant est monté et l'utilisateur toujours connecté.
     reconnectTimer = setTimeout(() => {
-      if (localStorage.getItem("ie_access_token")) connectRealtime();
+      if (auth.accessToken) connectRealtime();
     }, 4000);
   };
 
@@ -107,7 +109,7 @@ function closeOnOutsideClick(e) {
 
 onMounted(() => {
   loadNotifications();
-  connectRealtime();
+  if (auth.accessToken) connectRealtime();
   // Filet de sécurité si le WebSocket est indisponible (proxy, réseau restrictif...) :
   // rafraîchissement périodique bien plus espacé, le temps réel étant assuré par la WS.
   pollHandle = setInterval(loadNotifications, 60000);

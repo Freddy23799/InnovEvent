@@ -62,6 +62,12 @@ const canReview = computed(() => auth.role === "client" || auth.role === "organi
 // (redirection automatique vers cette page après authentification).
 const canBook = computed(() => !auth.isAuthenticated || auth.role === "client" || auth.role === "organizer");
 const canContactAdmin = computed(() => auth.isAuthenticated && auth.role !== "admin");
+const guidedTourOpen = ref(false);
+const WHATSAPP_CONTACT = "237673003993";
+const guidedTourWhatsappUrl = computed(() => {
+  const message = "Bonjour, je souhaite organiser une visite guidée des salles de réception. Pouvez-vous m'accompagner ?";
+  return `https://wa.me/${WHATSAPP_CONTACT}?text=${encodeURIComponent(message)}`;
+});
 
 function goToBooking(venue) {
   router.push({ name: "bookings", query: { resource_type: "venue", resource_id: venue.id } });
@@ -74,9 +80,20 @@ async function contactAdmin() {
   try {
     const { data } = await api.post("/messaging/conversations/contact-admin/");
     router.push({ name: "messaging", query: { conversation: data.id } });
+  } catch (error) {
+    toast.error(error?.response?.data?.detail || "Impossible d'ouvrir la messagerie pour le moment.");
   } finally {
     contactingAdmin.value = false;
   }
+}
+
+function continueGuidedTourOnPlatform() {
+  guidedTourOpen.value = false;
+  if (!auth.isAuthenticated) {
+    router.push({ name: "login", query: { next: "/app/messaging?guided_tour=1" } });
+    return;
+  }
+  contactAdmin();
 }
 
 const venues = ref([]);
@@ -271,10 +288,32 @@ onMounted(() => {
         <p class="ie-page-subtitle">Catalogue des salles disponibles pour vos événements.</p>
       </div>
       <div class="ie-page-header-actions">
+        <button class="ie-btn ie-btn-primary" type="button" @click="guidedTourOpen = true">
+          <i class="fa-solid fa-map-location-dot"></i> Visite guidée
+        </button>
         <button v-if="canManage" class="ie-btn ie-btn-primary" @click="showForm ? (showForm = false) : startCreate()">
           <i class="fa-solid" :class="showForm ? 'fa-xmark' : 'fa-plus'"></i> {{ showForm ? "Annuler" : "Nouvelle salle" }}
         </button>
       </div>
+    </div>
+
+    <div v-if="guidedTourOpen" class="ie-guided-tour-backdrop" @click.self="guidedTourOpen = false">
+      <section class="ie-guided-tour-dialog" role="dialog" aria-modal="true" aria-labelledby="guided-tour-title">
+        <button class="ie-guided-tour-close" type="button" aria-label="Fermer" @click="guidedTourOpen = false">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div class="ie-guided-tour-icon"><i class="fa-solid fa-map-location-dot"></i></div>
+        <h2 id="guided-tour-title">Organiser une visite guidée</h2>
+        <p>Choisissez comment échanger avec notre équipe au sujet de la visite des salles.</p>
+        <a class="ie-btn ie-guided-tour-whatsapp" :href="guidedTourWhatsappUrl" target="_blank" rel="noopener noreferrer">
+          <i class="fa-brands fa-whatsapp"></i> Contacter directement sur WhatsApp
+        </a>
+        <button v-if="auth.role !== 'admin'" class="ie-btn ie-btn-primary ie-guided-tour-platform" type="button" :disabled="contactingAdmin" @click="continueGuidedTourOnPlatform">
+          <i class="fa-solid fa-comments"></i>
+          {{ contactingAdmin ? "Ouverture de la messagerie…" : "Continuer sur la messagerie de la plateforme" }}
+        </button>
+        <p v-if="!auth.isAuthenticated" class="ie-guided-tour-hint">La connexion à votre compte sera demandée pour utiliser la messagerie.</p>
+      </section>
     </div>
 
     <div v-if="showForm" class="ie-card ie-card-body" style="margin-bottom: 20px;">
@@ -466,6 +505,16 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.ie-guided-tour-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 18px; background: rgba(13, 28, 43, .58); }
+.ie-guided-tour-dialog { position: relative; width: min(100%, 440px); padding: 30px; border-radius: 16px; background: #fff; box-shadow: 0 24px 70px rgba(8, 24, 38, .28); text-align: center; }
+.ie-guided-tour-close { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--ie-navy-soft); color: var(--ie-navy); cursor: pointer; }
+.ie-guided-tour-icon { display: grid; place-items: center; width: 54px; height: 54px; margin: 0 auto 14px; border-radius: 50%; background: var(--ie-red-soft); color: var(--ie-red); font-size: 22px; }
+.ie-guided-tour-dialog h2 { margin: 0 0 8px; color: var(--ie-navy); font-size: 20px; }
+.ie-guided-tour-dialog > p { margin: 0 0 20px; color: var(--ie-muted); font-size: 13px; line-height: 1.5; }
+.ie-guided-tour-dialog .ie-btn { width: 100%; justify-content: center; margin-top: 10px; text-decoration: none; }
+.ie-guided-tour-whatsapp { background: #25d366; border-color: #25d366; color: #fff; }
+.ie-guided-tour-platform { min-height: 44px; }
+.ie-guided-tour-dialog .ie-guided-tour-hint { margin: 14px 0 0; font-size: 12px; }
 .ie-catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
 .ie-catalog-card { overflow: hidden; display: flex; flex-direction: column; }
 .ie-catalog-photo {
