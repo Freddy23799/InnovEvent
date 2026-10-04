@@ -78,11 +78,11 @@ const hasProfileMarketplaceSubscription = computed(() => marketplaceAccess.hasPr
 // long à parcourir dans la sidebar. Filtré/verrouillé par catégorie selon le
 // palier d'abonnement du compte (voir plus haut).
 const actorsMarketplaceSections = computed(() =>
-  ACTOR_CATEGORY_GROUPS.filter((group) => isActorGroupVisible(group.featureKey)).map((group) => ({
+  ACTOR_CATEGORY_GROUPS.filter((group) => auth.role === "admin" || isActorGroupVisible(group.featureKey)).map((group) => ({
     type: "group",
     label: group.title,
     icon: group.icon,
-    locked: isActorGroupLocked(group.featureKey),
+    locked: auth.role !== "admin" && isActorGroupLocked(group.featureKey),
     children: group.items.map((item) => ({
       label: item.label,
       to: { name: "premium-marketplace", query: { type: "actors", category: item.value } },

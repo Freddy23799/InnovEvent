@@ -21,6 +21,9 @@ done
 python manage.py migrate --noinput
 python manage.py ensure_initial_admin
 python manage.py seed_landing_media /opt/innovevent-seed/acceuil --if-empty
+# Initialise les paliers et fonctionnalités Marketplace dans les bases neuves.
+# La commande est idempotente et ne remplace pas les réglages existants.
+python manage.py seed_marketplace_features
 python manage.py collectstatic --noinput
 
 # Daphne (ASGI) plutôt que gunicorn (WSGI) : un seul processus sert à la fois
