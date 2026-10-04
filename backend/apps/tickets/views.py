@@ -149,7 +149,10 @@ class TicketPurchaseView(APIView):
         if unavailability_reason:
             return Response({"detail": unavailability_reason}, status=status.HTTP_409_CONFLICT)
         if quantity > ticket_type.remaining_quota:
-            return Response({"detail": "Quota insuffisant."}, status=status.HTTP_409_CONFLICT)
+            return Response(
+                {"detail": f"Il ne reste que {ticket_type.remaining_quota} billet(s). Réduisez la quantité puis réessayez."},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         payment = Payment.objects.create(
             user=request.user,

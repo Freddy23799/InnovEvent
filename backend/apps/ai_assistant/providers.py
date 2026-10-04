@@ -94,7 +94,7 @@ class LLMProvider(BaseAIProvider):
 
     def recommend(self, prompt, catalog):
         if not self.api_key:
-            raise AIProviderError("Aucune clé API IA configurée (AI_PROVIDER_API_KEY manquant).")
+            raise AIProviderError("L'assistant est momentanément indisponible. Réessayez un peu plus tard.")
 
         system_prompt = (
             "Tu es l'assistant InnovEvent-GS. Tu dois choisir exclusivement parmi les ressources "
@@ -120,7 +120,7 @@ class LLMProvider(BaseAIProvider):
             content = response.json()["choices"][0]["message"]["content"]
             return json.loads(content)
         except (requests.RequestException, KeyError, json.JSONDecodeError) as exc:
-            raise AIProviderError(f"Le fournisseur IA est indisponible : {exc}") from exc
+            raise AIProviderError("L'assistant est momentanément indisponible. Réessayez un peu plus tard.") from exc
 
 
 def get_ai_provider() -> BaseAIProvider:

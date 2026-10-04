@@ -15,16 +15,15 @@ démonstration complet ; PayPal/FreemoPay/KOB posés en architecture mais néces
 identifiants marchands réels avant activation), emails transactionnels, journal d'audit,
 healthcheck, API documentée (Swagger `/api/docs/`).
 
-**Priorité P1 — modèles + API fonctionnels, UI frontend non branchée pour tous :**
-messagerie (conversations/messages par polling REST), assistant IA (fournisseur démo pleinement
-opérationnel sur les ressources réelles de la base ; fournisseur LLM interchangeable posé mais
-non testé sans clé API réelle), formations/enrôlement/attestations/badges (matricule auto, QR
-signé, PDF), RH et paie (fiches de paie avec PDF).
+**Priorité P1 — modules et interfaces disponibles :** messagerie (conversations/messages par
+polling REST), assistant IA (fournisseur démo opérationnel sur les ressources de la base et
+fournisseur LLM configurable), formations/enrôlement/attestations/badges, ainsi que RH et paie.
+Les écrans correspondants sont présents dans l'application ; l'activation des intégrations externes
+reste conditionnée à la configuration de leurs clés et services.
 
-**Frontend Vue** : squelette complet (auth, layout responsive avec sidebar repliable, design
-system aux couleurs InnovEvent, dashboards admin/client/participant, CRUD événements). Les écrans
-détaillés pour réservations, billetterie (marché public), messagerie, assistant IA, formations et
-RH/paie restent à construire sur les mêmes fondations (composants + services API déjà en place).
+**Frontend Vue** : authentification, layout responsive avec sidebar repliable, design system,
+dashboards par rôle, CRUD événements, réservations, billetterie publique, messagerie, assistant,
+formations, RH/paie, marketplace et livraisons.
 
 **Non fait à ce stade** : tests automatisés (section 23), graphiques analytiques du dashboard,
 TLS/Let's Encrypt (à configurer sur le VPS cible), intégration réelle des passerelles de paiement,
@@ -206,8 +205,7 @@ uniquement).
 
 ## 8. Prochaines étapes suggérées
 
-1. Écrans frontend restants : marché public de billetterie, réservations, messagerie, assistant IA,
-   formations, RH/paie (backend déjà prêt pour tous).
+1. Compléter les parcours métier encore manquants et poursuivre la revue des erreurs/messages.
 2. Suite de tests (pytest-django) couvrant permissions, achat de billet, conflits de réservation,
    validation QR — section 23 du CDC.
 3. TLS/Let's Encrypt + nom de domaine sur le VPS cible, sauvegardes automatisées quotidiennes.

@@ -67,7 +67,7 @@ async function submitForm() {
     await loadUsers();
   } catch (e) {
     const errors = e?.response?.data?.errors;
-    errorMessage.value = errors ? Object.values(errors).flat().join(" ") : "Impossible d'enregistrer ce compte.";
+    errorMessage.value = e?.response?.data?.detail || (errors ? Object.values(errors).flat().join(" ") : "Impossible d'enregistrer ce compte.");
   } finally {
     submitting.value = false;
   }
@@ -215,4 +215,3 @@ onMounted(() => {
 }
 .ie-online-dot.online { background: var(--ie-success); box-shadow: 0 0 0 3px var(--ie-success-soft); }
 </style>
-

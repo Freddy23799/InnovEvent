@@ -45,7 +45,7 @@ async function submitForm() {
     await loadData();
   } catch (e) {
     const errors = e?.response?.data?.errors;
-    errorMessage.value = errors ? Object.values(errors).flat().join(" ") : "Impossible de générer cette fiche de paie.";
+    errorMessage.value = e?.response?.data?.detail || (errors ? Object.values(errors).flat().join(" ") : "Impossible de générer cette fiche de paie.");
   } finally {
     submitting.value = false;
   }

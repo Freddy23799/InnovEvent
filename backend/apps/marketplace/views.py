@@ -1255,6 +1255,6 @@ class MarketplaceFeatureResolveView(APIView):
         marketplace_type = request.query_params.get("marketplace_type")
         valid_types = {choice[0] for choice in MarketplaceListing.MarketplaceType.choices}
         if marketplace_type not in valid_types:
-            return Response({"detail": "Paramètre marketplace_type invalide ou manquant."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Choisissez un espace marketplace valide."}, status=status.HTTP_400_BAD_REQUEST)
         resolved = resolve_features(request.user, marketplace_type)
         return Response(ResolvedFeatureSerializer(resolved, many=True).data)

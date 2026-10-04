@@ -144,7 +144,7 @@ async function confirmCreateDelivery(booking) {
     toast.success("Livraison créée.");
     router.push({ name: "delivery-detail", params: { id: data.id } });
   } catch (e) {
-    toast.error(e?.response?.data?.detail?.[0] || e?.response?.data?.detail || "Impossible de créer cette livraison.");
+    toast.error(e?.response?.data?.detail || e?.response?.data?.non_field_errors?.[0] || "Impossible de créer cette livraison.");
   } finally {
     deliverySubmitting.value = false;
   }

@@ -152,31 +152,28 @@ class LandingMediaViewSet(ModelViewSet):
         start_dt = timezone.make_aware(datetime.combine(event_date, time(8, 0)))
         end_dt = timezone.make_aware(datetime.combine(event_date, time(23, 0)))
 
-        try:
-            with transaction.atomic():
-                event = Event.objects.create(
-                    title=event_title, organizer=request.user, start_date=start_dt, end_date=end_dt,
-                    description=f"Créé automatiquement depuis la demande de devis du pack « {pack.label} ».",
-                )
-                bookings = []
-                for item in items:
-                    resource = item.resource
-                    if not resource:
-                        continue
-                    quantity = qty_by_id.get(item.id, item.default_quantity)
-                    payload = {
-                        "event": event.id, "resource_type": item.resource_type,
-                        "quantity": quantity if item.resource_type == "equipment" else 1,
-                        "start_datetime": start_dt, "end_datetime": end_dt, "notes": notes,
-                        item.resource_type: resource.id,
-                    }
-                    serializer = BookingSerializer(data=payload)
-                    serializer.is_valid(raise_exception=True)
-                    bookings.append(serializer.save(created_by=request.user))
-                if not bookings:
-                    raise ValidationError("Aucun élément valide sélectionné.")
-        except ValidationError as exc:
-            return Response({"detail": exc.detail}, status=400)
+        with transaction.atomic():
+            event = Event.objects.create(
+                title=event_title, organizer=request.user, start_date=start_dt, end_date=end_dt,
+                description=f"Créé automatiquement depuis la demande de devis du pack « {pack.label} ».",
+            )
+            bookings = []
+            for item in items:
+                resource = item.resource
+                if not resource:
+                    continue
+                quantity = qty_by_id.get(item.id, item.default_quantity)
+                payload = {
+                    "event": event.id, "resource_type": item.resource_type,
+                    "quantity": quantity if item.resource_type == "equipment" else 1,
+                    "start_datetime": start_dt, "end_datetime": end_dt, "notes": notes,
+                    item.resource_type: resource.id,
+                }
+                serializer = BookingSerializer(data=payload)
+                serializer.is_valid(raise_exception=True)
+                bookings.append(serializer.save(created_by=request.user))
+            if not bookings:
+                raise ValidationError("Aucun élément valide sélectionné.")
 
         for booking in bookings:
             notify_booking_created(booking)

@@ -1,9 +1,13 @@
+import logging
+
 from apps.equipment.models import Equipment
 from apps.providers.models import Provider
 from apps.venues.models import Venue
 
 from .models import AssistantConversation, AssistantMessage
 from .providers import AIProviderError, get_ai_provider
+
+logger = logging.getLogger(__name__)
 
 
 def build_catalog():
@@ -21,11 +25,12 @@ def ask_assistant(user, conversation: AssistantConversation, prompt: str) -> Ass
     provider = get_ai_provider()
     try:
         result = provider.recommend(prompt, catalog)
-    except AIProviderError as exc:
+    except AIProviderError:
+        logger.exception("L'assistant IA n'a pas pu générer de réponse.")
         return AssistantMessage.objects.create(
             conversation=conversation,
             role=AssistantMessage.Role.ASSISTANT,
-            content=f"Désolé, l'assistant est momentanément indisponible ({exc}).",
+            content="Désolé, l'assistant est momentanément indisponible. Réessayez un peu plus tard.",
             recommendations={},
         )
 

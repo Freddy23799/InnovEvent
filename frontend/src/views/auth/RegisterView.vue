@@ -154,7 +154,11 @@ async function handleSubmit() {
     // de toujours renvoyer vers un tableau de bord générique après inscription.
     router.push(route.query.next || (form.profile === "talent" ? { name: "talent-missions" } : { name: "dashboard" }));
   } catch (e) {
-    errors.value = e?.response?.data?.errors || { detail: "Une erreur est survenue." };
+    const payload = e?.response?.data || {};
+    errors.value = {
+      ...(payload.errors || {}),
+      detail: payload.detail || "Impossible de créer votre compte. Vérifiez les informations puis réessayez.",
+    };
   } finally {
     loading.value = false;
   }

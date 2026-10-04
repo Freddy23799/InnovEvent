@@ -40,26 +40,24 @@ class DemoGateway(BasePaymentGateway):
 class PayPalGateway(BasePaymentGateway):
     def charge(self, payment):
         if not settings.PAYPAL_CLIENT_ID or not settings.PAYPAL_CLIENT_SECRET:
-            raise PaymentGatewayError(
-                "PayPal n'est pas configuré (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET manquants)."
-            )
+            raise PaymentGatewayError("Le paiement PayPal n'est pas disponible pour le moment. Choisissez un autre moyen de paiement.")
         # Intégration réelle à brancher ici via le SDK PayPal Checkout Orders API,
         # une fois les identifiants marchands PayPal fournis.
-        raise PaymentGatewayError("Intégration PayPal non finalisée pour cet environnement.")
+        raise PaymentGatewayError("Le paiement PayPal n'est pas encore disponible. Choisissez un autre moyen de paiement.")
 
 
 class MobileMoneyGateway(BasePaymentGateway):
     def charge(self, payment):
         if not settings.FREEMOPAY_API_KEY:
-            raise PaymentGatewayError("FreemoPay n'est pas configuré (FREEMOPAY_API_KEY manquant).")
-        raise PaymentGatewayError("Intégration Mobile Money / FreemoPay non finalisée pour cet environnement.")
+            raise PaymentGatewayError("Le paiement Mobile Money n'est pas disponible pour le moment. Choisissez un autre moyen de paiement.")
+        raise PaymentGatewayError("Le paiement Mobile Money n'est pas encore disponible. Choisissez un autre moyen de paiement.")
 
 
 class KobGateway(BasePaymentGateway):
     def charge(self, payment):
         if not settings.KOB_API_KEY:
-            raise PaymentGatewayError("KOB n'est pas configuré (KOB_API_KEY manquant).")
-        raise PaymentGatewayError("Intégration KOB non finalisée pour cet environnement.")
+            raise PaymentGatewayError("Le paiement KOB n'est pas disponible pour le moment. Choisissez un autre moyen de paiement.")
+        raise PaymentGatewayError("Le paiement KOB n'est pas encore disponible. Choisissez un autre moyen de paiement.")
 
 
 class CardGateway(BasePaymentGateway):
@@ -67,7 +65,7 @@ class CardGateway(BasePaymentGateway):
     FreemoPay carte, ou l'acquéreur retenu par InnovEvent)."""
 
     def charge(self, payment):
-        raise PaymentGatewayError("Intégration carte bancaire non finalisée pour cet environnement.")
+        raise PaymentGatewayError("Le paiement par carte n'est pas encore disponible. Choisissez un autre moyen de paiement.")
 
 
 GATEWAYS = {
@@ -87,5 +85,5 @@ def get_gateway(provider: str) -> BasePaymentGateway:
         return DemoGateway()
     gateway_class = GATEWAYS.get(provider)
     if not gateway_class:
-        raise PaymentGatewayError(f"Passerelle de paiement inconnue : {provider}")
+        raise PaymentGatewayError("Le moyen de paiement choisi n'est pas reconnu. Choisissez un moyen proposé.")
     return gateway_class()

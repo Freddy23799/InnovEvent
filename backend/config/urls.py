@@ -1,7 +1,9 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
+from django.views.defaults import server_error as default_server_error
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.audit.views import HealthCheckView
@@ -45,6 +47,20 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
 ]
+
+
+def api_server_error(request):
+    """Keep unexpected API failures readable without returning a traceback."""
+    if request.path.startswith("/api/"):
+        message = "Une erreur est survenue. Réessayez dans quelques instants. Si le problème persiste, contactez l'assistance."
+        return JsonResponse(
+            {"detail": message, "message": message, "status_code": 500},
+            status=500,
+        )
+    return default_server_error(request)
+
+
+handler500 = "config.urls.api_server_error"
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
