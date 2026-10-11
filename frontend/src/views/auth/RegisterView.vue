@@ -115,6 +115,33 @@ const form = reactive({
 
 const activeProfile = computed(() => PROFILES.find((p) => p.value === form.profile));
 const selectedProfile = computed(() => PROFILE_VALUES.includes(route.params.profile) ? route.params.profile : PROFILE_VALUES.includes(route.query.profile) ? route.query.profile : null);
+const MARKETPLACE_CONTEXT = {
+  actors: {
+    title: "Marketplace des acteurs",
+    description: "DJ, traiteurs, photographes et autres professionnels de l’événementiel réunis par métier.",
+    problem: "Trouver les bons professionnels et centraliser les demandes de devis peut vite devenir difficile à suivre.",
+    solution: "Le Marketplace rassemble les profils par métier pour vous aider à les découvrir, demander des devis et suivre vos échanges.",
+  },
+  interior_design: {
+    title: "Décoration & design intérieur",
+    description: "Des profils de décorateurs et designers pour vos espaces et vos événements.",
+    problem: "Trouver une expertise déco qui correspond à l’ambiance et aux besoins de son projet demande du temps.",
+    solution: "Ce Marketplace vous permet de parcourir des profils spécialisés, de préciser votre besoin et d’adresser une demande de devis.",
+  },
+  venues: {
+    title: "Salles de réception",
+    description: "Un espace dédié à la découverte des salles de réception pour votre événement.",
+    problem: "Comparer les lieux et suivre les demandes de réservation peut disperser les informations de votre projet.",
+    solution: "Le Marketplace regroupe les salles et leurs informations pour vous aider à repérer un lieu et à envoyer une demande.",
+  },
+  sale: {
+    title: "Marketplace vente",
+    description: "Des articles, objets et équipements événementiels proposés à la vente.",
+    problem: "Rechercher les articles nécessaires à un événement auprès de plusieurs vendeurs complique le suivi des achats.",
+    solution: "Le Marketplace rassemble les annonces de vente et vous permet de retrouver vos commandes dans votre compte.",
+  },
+};
+const selectedMarketplace = computed(() => MARKETPLACE_CONTEXT[route.query.marketplace] || null);
 watch(selectedProfile, (profile) => { if (profile) form.profile = profile; });
 function chooseProfile(profile) { router.push({ name: "register-profile", params: { profile }, query: route.query }); }
 
@@ -172,41 +199,93 @@ async function handleSubmit() {
       <div class="ie-split-hero-scrim"></div>
       <div class="ie-split-hero-inner">
         <router-link :to="{ name: 'landing' }" class="ie-split-brand">
-          <img :src="logo" alt="InnovEvent" class="ie-split-logo" />
-          <span class="ie-split-brand-word">InnovEvent<span>Group</span></span>
+          <img :src="logo" alt="InnovEvent&amp;Home groupe" class="ie-split-logo" />
+          <span class="ie-split-brand-word">InnovEvent&amp;Home <span>groupe</span></span>
         </router-link>
 
         <div class="ie-split-hero-body">
-          <p class="ie-split-eyebrow">Créer un compte</p>
-          <h1>Rejoignez-nous,<br />créez votre projet.</h1>
-          <p class="ie-split-hero-lede">Un seul compte pour réserver vos salles, gérer vos prestataires, louer votre matériel et suivre votre formation.</p>
+          <p class="ie-split-eyebrow">{{ selectedMarketplace ? "Marketplace sélectionné" : form.profile === "talent" ? "Espace talent" : form.profile === "client" ? "Espace client" : form.profile === "professionnel" || form.profile === "entreprise" ? "Espace professionnel" : "Qui sommes-nous" }}</p>
+          <h1 v-if="selectedMarketplace">{{ selectedMarketplace.title }}</h1>
+          <h1 v-else-if="form.profile === 'talent'">Faites de vos compétences de nouvelles opportunités.</h1>
+          <h1 v-else-if="form.profile === 'client'">Trouvez les bonnes solutions pour votre projet.</h1>
+          <h1 v-else-if="form.profile === 'professionnel' || form.profile === 'entreprise'">Développez votre activité avec InnovEvent.</h1>
+          <h1 v-else>InnovEvent accompagne vos projets.</h1>
+          <p class="ie-split-hero-lede" v-if="selectedMarketplace">{{ selectedMarketplace.description }}</p>
+          <p class="ie-split-hero-lede" v-else-if="form.profile === 'talent'">Rejoignez la communauté des talents de l’événementiel et accédez à des missions, stages et autres opportunités correspondant à votre profil.</p>
+          <p class="ie-split-hero-lede" v-else-if="form.profile === 'client'">Préparez vos événements et concrétisez vos projets en trouvant au même endroit des salles, des prestataires et des services adaptés à vos besoins.</p>
+          <p class="ie-split-hero-lede" v-else-if="form.profile === 'professionnel' || form.profile === 'entreprise'">Présentez votre savoir-faire, valorisez vos services et développez votre clientèle grâce aux outils professionnels d’InnovEvent.</p>
+          <p class="ie-split-hero-lede" v-else>InnovEvent&amp;Home groupe réunit l’organisation événementielle, la location, les services spécialisés et la formation au sein d’un même écosystème.</p>
 
-          <div class="ie-split-services">
+          <div v-if="selectedMarketplace" class="ie-registration-context">
+            <div class="ie-registration-context-block">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-circle-exclamation"></i> Le besoin</span>
+              <p>{{ selectedMarketplace.problem }}</p>
+            </div>
+            <div class="ie-registration-context-block is-solution">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-lightbulb"></i> La solution InnovEvent</span>
+              <p>{{ selectedMarketplace.solution }}</p>
+            </div>
+          </div>
+
+          <div v-else-if="form.profile === 'professionnel' || form.profile === 'entreprise'" class="ie-registration-context">
+            <div class="ie-registration-context-block">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-bullseye"></i> Donnez de la visibilité à votre activité</span>
+              <p>Créez un profil professionnel clair pour présenter votre expertise, vos prestations et votre univers aux clients qui recherchent vos services.</p>
+            </div>
+            <div class="ie-registration-context-block is-solution">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-chart-line"></i> Développez votre clientèle</span>
+              <p>Recevez des demandes, échangez avec vos clients et suivez vos devis et réservations depuis un espace dédié à votre activité.</p>
+            </div>
+          </div>
+
+          <div v-else-if="form.profile === 'talent'" class="ie-registration-context">
+            <div class="ie-registration-context-block">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-briefcase"></i> Accédez à des opportunités</span>
+              <p>Découvrez des missions ponctuelles, des stages et des offres correspondant à vos compétences et à vos disponibilités.</p>
+            </div>
+            <div class="ie-registration-context-block is-solution">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-id-card"></i> Faites connaître votre profil</span>
+              <p>Présentez votre formation, votre expérience et vos savoir-faire pour aider les recruteurs à identifier le bon talent.</p>
+            </div>
+          </div>
+
+          <div v-else-if="form.profile === 'client'" class="ie-registration-context">
+            <div class="ie-registration-context-block">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-magnifying-glass"></i> Trouvez le bon service</span>
+              <p>Explorez les salles, prestataires et offres disponibles pour votre événement ou votre projet.</p>
+            </div>
+            <div class="ie-registration-context-block is-solution">
+              <span class="ie-registration-context-label"><i class="fa-solid fa-list-check"></i> Gardez le suivi au même endroit</span>
+              <p>Demandez des devis, échangez avec les professionnels et retrouvez vos demandes et réservations depuis votre espace client.</p>
+            </div>
+          </div>
+
+          <div v-else class="ie-split-services">
             <div class="ie-split-service">
               <span class="ie-split-service-icon"><i class="fa-solid fa-calendar-week"></i></span>
               <div>
                 <strong>Organisation d'événements</strong>
-                <span>Salles, prestataires, billetterie et suivi budgétaire.</span>
+                <span>Conception et coordination de vos événements.</span>
               </div>
             </div>
             <div class="ie-split-service">
               <span class="ie-split-service-icon"><i class="fa-solid fa-sliders"></i></span>
               <div>
                 <strong>Location de matériel</strong>
-                <span>Mobilier, sonorisation, éclairage et chapiteaux.</span>
+                <span>Un catalogue de matériel pour vos besoins événementiels.</span>
               </div>
             </div>
             <div class="ie-split-service">
               <span class="ie-split-service-icon"><i class="fa-solid fa-graduation-cap"></i></span>
               <div>
                 <strong>InnovEvent Academy</strong>
-                <span>Formations certifiantes aux métiers de l'événementiel.</span>
+                <span>Des formations dédiées aux métiers de l'événementiel et du design.</span>
               </div>
             </div>
           </div>
         </div>
 
-        <p class="ie-split-footer">© 2026 InnovEvent Group · Douala · Yaoundé · Bafoussam</p>
+          <p class="ie-split-footer">InnovEvent&amp;Home groupe · Un compte unique pour accéder à l’ensemble de nos services, réunis au même endroit.</p>
       </div>
     </aside>
 
@@ -405,6 +484,13 @@ async function handleSubmit() {
 .ie-split-hero-body h1 { font-size: clamp(2rem, 3.4vw, 2.75rem); font-weight: 500; line-height: 1.14; letter-spacing: -0.01em; margin: 0 0 20px; color: #fff; }
 .ie-split-hero-lede { color: rgba(255, 255, 255, 0.72); font-size: 1rem; line-height: 1.65; margin: 0 0 34px; }
 
+.ie-registration-context { display: flex; flex-direction: column; gap: 12px; max-width: 490px; }
+.ie-registration-context-block { padding: 16px 18px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: rgba(255,255,255,.055); }
+.ie-registration-context-block.is-solution { border-color: rgba(243,185,188,.28); background: rgba(192,39,45,.12); }
+.ie-registration-context-label { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #f3b9bc; font-size: .72rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
+.ie-registration-context-label i { font-size: 12px; }
+.ie-registration-context-block p { margin: 0; color: rgba(255,255,255,.8); font-size: .86rem; line-height: 1.55; }
+
 .ie-split-services { display: flex; flex-direction: column; gap: 10px; }
 .ie-split-service {
   display: flex; align-items: center; gap: 15px; background: rgba(255, 255, 255, 0.05);
@@ -421,7 +507,7 @@ async function handleSubmit() {
 .ie-split-service strong { display: block; font-size: 0.93rem; font-weight: 600; margin-bottom: 3px; letter-spacing: -0.005em; }
 .ie-split-service span { display: block; font-size: 0.8rem; color: rgba(255, 255, 255, 0.62); line-height: 1.4; }
 
-.ie-split-footer { font-size: 0.76rem; color: rgba(255, 255, 255, 0.4); letter-spacing: 0.01em; }
+.ie-split-footer { max-width: 520px; font-size: 0.96rem; line-height: 1.55; font-weight: 600; color: rgba(255, 255, 255, 0.72); letter-spacing: 0.01em; }
 
 /* Panneau de droite */
 .ie-split-form { display: flex; align-items: center; justify-content: center; padding: 40px 32px; background: var(--ie-white); overflow-y: auto; }

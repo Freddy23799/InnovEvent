@@ -58,15 +58,15 @@ async function handleSubmit() {
       <div class="ie-split-hero-scrim"></div>
       <div class="ie-split-hero-inner">
         <router-link :to="{ name: 'landing' }" class="ie-split-brand">
-          <img :src="logo" alt="InnovEvent" class="ie-split-logo" />
-          <span class="ie-split-brand-word">InnovEvent<span>Group</span></span>
+          <img :src="logo" alt="InnovEvent&amp;Home groupe" class="ie-split-logo" />
+          <span class="ie-split-brand-word">InnovEvent&amp;Home <span>groupe</span></span>
         </router-link>
         <div class="ie-split-hero-body">
           <p class="ie-split-eyebrow">Espace client</p>
           <h1>Choisissez<br />un nouveau mot de passe.</h1>
           <p class="ie-split-hero-lede">Pour votre sécurité, choisissez un mot de passe d'au moins 12 caractères que vous n'utilisez sur aucun autre site.</p>
         </div>
-        <p class="ie-split-footer">© 2026 InnovEvent Group · Douala · Yaoundé · Bafoussam</p>
+        <p class="ie-split-footer">© 2026 InnovEvent&amp;Home groupe · Douala · Yaoundé · Bafoussam</p>
       </div>
     </aside>
 

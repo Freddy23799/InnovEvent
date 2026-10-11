@@ -72,7 +72,7 @@ onMounted(loadEmployees);
     <div class="ie-page-header">
       <div>
         <h1><i class="fa-solid fa-users-gear" style="color: var(--ie-red); margin-right: 8px;"></i>Employés</h1>
-        <p class="ie-page-subtitle">Personnel InnovEvent-GS et informations RH de base.</p>
+        <p class="ie-page-subtitle">Personnel InnovEvent&amp;Home groupe et informations RH de base.</p>
       </div>
       <div class="ie-page-header-actions">
         <button class="ie-btn ie-btn-primary" @click="showForm ? (showForm = false) : startCreate()">

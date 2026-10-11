@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import logoMark from "../../assets/images/logo-mark.png";
 import InstallPwaButton from "../../components/InstallPwaButton.vue";
 import LandingChatbot from "../../components/LandingChatbot.vue";
@@ -7,6 +8,7 @@ import api from "../../services/api";
 import { useLightboxStore } from "../../stores/lightbox";
 
 const lightbox = useLightboxStore();
+const router = useRouter();
 function openLightbox(item) {
   if (item?.photo) lightbox.open(item.photo, item.label);
 }
@@ -24,25 +26,28 @@ function closeNav() {
   navOpen.value = false;
 }
 
-// Chiffres clés : compteur animé (0 → valeur cible) déclenché à l'entrée dans le viewport.
-const STATS = [
-  { key: "years", target: 8, suffix: " ans", icon: "fa-award", label: "d'expérience dans l'événementiel" },
-  { key: "events", target: 450, suffix: "+", icon: "fa-champagne-glasses", label: "événements réalisés" },
-  { key: "satisfaction", target: 97, suffix: "%", icon: "fa-heart", label: "de clients satisfaits" },
+// Chiffres de démonstration demandés pour illustrer l'activité de la plateforme.
+const TRUST_METRICS = [
+  { key: "users", target: 5000, suffix: "+", label: "utilisateurs" },
+  { key: "providers", target: 3000, suffix: "+", label: "prestataires" },
+  { key: "venues", target: 50, suffix: "+", label: "salles disponibles" },
+  { key: "marketplaces", target: 5, suffix: "+", label: "marketplaces" },
 ];
-const statsDisplay = reactive({ years: 0, events: 0, satisfaction: 0 });
-const statsBandEl = ref(null);
-let statsStarted = false;
+const trustMetricValues = reactive(Object.fromEntries(TRUST_METRICS.map(({ key }) => [key, 0])));
+const trustMetricsEl = ref(null);
+let trustMetricsStarted = false;
 
-function animateStats() {
-  if (statsStarted) return;
-  statsStarted = true;
-  const duration = 1400;
+function animateTrustMetrics() {
+  if (trustMetricsStarted) return;
+  trustMetricsStarted = true;
+  const duration = 1200;
   const start = performance.now();
   function tick(now) {
     const progress = Math.min((now - start) / duration, 1);
     const eased = 1 - Math.pow(1 - progress, 3);
-    STATS.forEach((s) => { statsDisplay[s.key] = Math.round(s.target * eased); });
+    TRUST_METRICS.forEach(({ key, target }) => {
+      trustMetricValues[key] = Math.round(target * eased);
+    });
     if (progress < 1) requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
@@ -57,10 +62,7 @@ const VALUES = [
   { icon: "fa-leaf", title: "Impact et durabilité", text: "Des événements porteurs de sens et de valeur durable." },
   { icon: "fa-heart", title: "Satisfaction client", text: "Une approche orientée résultats et amélioration continue." },
 ];
-// Marketplace InnovEvent : les 4 sous-marketplaces premium de la plateforme —
-// présentés ici pour que le visiteur en découvre l'existence avant même de
-// créer un compte. Les liens pointent vers l'espace connecté (redirection
-// automatique vers la connexion, puis retour direct sur le marketplace choisi).
+// Marketplace InnovEvent : les 4 espaces spécialisés à choisir avant l'inscription.
 const MARKETPLACE_ITEMS = [
   { type: "actors", icon: "fa-people-group", title: "Marketplace des acteurs", text: "DJ, traiteurs, photographes, wedding planners... des dizaines de métiers, tous vérifiés par notre équipe." },
   { type: "interior_design", icon: "fa-couch", title: "Décoration & design intérieur", text: "Décorateurs et designers d'intérieur, pour vos espaces événementiels comme au-delà." },
@@ -72,16 +74,6 @@ const MARKETPLACE_BENEFITS = [
   { icon: "fa-file-signature", text: "Devis structurés, signés et exportables en PDF avec code QR" },
   { icon: "fa-user-shield", text: "Coordonnées privées — toute la négociation passe par la plateforme" },
   { icon: "fa-rotate-left", text: "Sans engagement, résiliable à tout moment" },
-];
-
-// Volet prestataires : le Marketplace ci-dessus est présenté côté client
-// (« consulter ») — ce volet s'adresse à l'autre face du marketplace, les
-// professionnels qui veulent y publier leur profil et recevoir des demandes.
-const PROVIDER_BENEFITS = [
-  { icon: "fa-eye", text: "Une visibilité directe auprès de clients déjà engagés dans leur projet" },
-  { icon: "fa-file-invoice-dollar", text: "Des demandes de devis structurées — plus d'échanges informels à relancer" },
-  { icon: "fa-lock", text: "Un paiement sécurisé sur la plateforme, commission prélevée automatiquement" },
-  { icon: "fa-comments", text: "Une messagerie intégrée, sans jamais partager votre numéro personnel" },
 ];
 
 const WHY_US = [
@@ -105,6 +97,65 @@ const sections = reactive({
   packs: [],
 });
 const loading = reactive({ deco: true, academy: true, portfolio: true, equipment: true, packs: true });
+
+const searchQuery = ref("");
+const searchOpen = ref(false);
+const SEARCH_ENTRIES = [
+  { label: "Organisation d’événements", detail: "Événements professionnels et privés", keywords: "events evenement mariage seminaire conférence organisation corporate cérémonie", target: "#events" },
+  { label: "Location de matériel", detail: "Mobilier, sonorisation et équipements", keywords: "location matériel equipement accessoires mobilier son éclairage chapiteau", target: "#location" },
+  { label: "Décoration & scénographie", detail: "Home & Design", keywords: "decoration design aménagement scénographie déco", target: "#homedesign" },
+  { label: "Formations InnovEvent Academy", detail: "Métiers de l’événementiel et du design", keywords: "formation academy cours attestation apprentissage", target: "#academy" },
+  { label: "Nos packs", detail: "Formules événementielles", keywords: "packs formules prix budget devis", target: "#packs" },
+  { label: "Nos réalisations", detail: "Galerie de projets InnovEvent", keywords: "réalisations portfolio photos galerie inspiration", target: "#galerie" },
+  { label: "Devenir prestataire", detail: "Créer un compte professionnel", keywords: "prestataire professionnel entreprise publier profil vendre offrir service", to: { name: "register", query: { profile: "professionnel" } } },
+  ...MARKETPLACE_ITEMS.map((item) => ({
+    label: item.title,
+    detail: item.text,
+    keywords: `${item.title} ${item.text}`,
+    to: { name: "register", query: { profile: "client", marketplace: item.type } },
+  })),
+];
+
+function normalizeSearch(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+const searchResults = computed(() => {
+  const query = normalizeSearch(searchQuery.value);
+  if (query.length < 2) return [];
+  const terms = query.split(/\s+/).filter(Boolean);
+  const dynamicEntries = [
+    ...sections.packs.map((item) => ({ label: item.label, detail: item.caption || "Pack InnovEvent", keywords: `${item.label} ${item.caption || ""}`, to: { name: "public-pack-detail", params: { packId: item.id } } })),
+    ...sections.equipment.map((item) => ({ label: item.label, detail: item.caption || "Article en location", keywords: `${item.label} ${item.caption || ""} location matériel equipement`, target: "#location" })),
+    ...sections.academy.map((item) => ({ label: item.label, detail: item.caption || "Formation InnovEvent Academy", keywords: `${item.label} ${item.caption || ""} formation academy`, target: "#academy" })),
+    ...sections.deco.map((item) => ({ label: item.label, detail: item.caption || "Décoration et scénographie", keywords: `${item.label} ${item.caption || ""} décoration design`, target: "#homedesign" })),
+    ...sections.portfolio.map((item) => ({ label: item.label, detail: item.caption || "Réalisation InnovEvent", keywords: `${item.label} ${item.caption || ""} événement réalisation`, target: "#galerie" })),
+  ];
+  return [...SEARCH_ENTRIES, ...dynamicEntries]
+    .filter((item) => {
+      const searchable = normalizeSearch(`${item.label} ${item.detail} ${item.keywords}`);
+      return terms.every((term) => searchable.includes(term));
+    })
+    .slice(0, 7);
+});
+
+function followSearchResult(result) {
+  searchOpen.value = false;
+  searchQuery.value = "";
+  if (result.to) router.push(result.to);
+  else if (result.target) {
+    const target = document.querySelector(result.target);
+    if (target) {
+      window.history.pushState(null, "", result.target);
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+}
+
+function submitSearch() {
+  if (searchResults.value[0]) followSearchResult(searchResults.value[0]);
+  else searchOpen.value = true;
+}
 
 async function loadSection(key) {
   loading[key] = true;
@@ -231,22 +282,18 @@ onMounted(async () => {
       { threshold: 0.12, rootMargin: "0px 0px -40px 0px" }
     );
     revealNewElements();
-
-    if (statsBandEl.value) {
-      const statsObserver = new IntersectionObserver(
-        (entries) => {
-          if (entries[0].isIntersecting) {
-            animateStats();
-            statsObserver.disconnect();
-          }
-        },
-        { threshold: 0.3 }
-      );
-      statsObserver.observe(statsBandEl.value);
+    if (trustMetricsEl.value) {
+      const metricsObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+          animateTrustMetrics();
+          metricsObserver.disconnect();
+        }
+      }, { threshold: 0.35 });
+      metricsObserver.observe(trustMetricsEl.value);
     }
   } else {
     revealNewElements();
-    animateStats();
+    animateTrustMetrics();
   }
 });
 
@@ -268,23 +315,19 @@ onUnmounted(() => {
     <!-- ======================= HEADER ======================= -->
     <header class="site-header" :class="{ 'is-scrolled': isScrolled }">
       <div class="nav-row">
-        <a href="#top" class="logo" aria-label="InnovEvent Group — Accueil">
-          <img :src="logoMark" alt="InnovEvent" class="logo-icon" />
-          <span class="logo-word">InnovEvent<span class="grp">Group</span></span>
+        <a href="#top" class="logo" aria-label="InnovEvent&amp;Home groupe — Accueil">
+          <img :src="logoMark" alt="InnovEvent&amp;Home groupe" class="logo-icon" />
+          <span class="logo-word">InnovEvent&amp;Home <span class="grp">groupe</span></span>
         </a>
 
         <div class="nav-scrim" :class="{ 'is-open': navOpen }" @click="closeNav"></div>
         <nav class="nav-links" :class="{ 'is-open': navOpen }" aria-label="Navigation principale">
           <a href="#top" @click="closeNav">Accueil</a>
-          <a href="#events" @click="closeNav">Événements</a>
-          <a href="#location" @click="closeNav">Location</a>
-          <a href="#prestataires" @click="closeNav">Prestataires</a>
+          <a href="#apropos" @click="closeNav">Entreprise &amp; vision</a>
+          <a href="#events" @click="closeNav">Services</a>
           <a href="#marketplace" @click="closeNav">Marketplace</a>
-          <a href="#design" @click="closeNav">Design</a>
-          <a href="#homedesign" @click="closeNav">Home</a>
           <a href="#academy" @click="closeNav">Formation</a>
-          <a href="#travel" @click="closeNav">Travel &amp; Hospitality</a>
-          <a href="#experiences" @click="closeNav">Experiences</a>
+          <a href="#contact" @click="closeNav">Contact</a>
           <div class="nav-links-mobile-actions">
             <InstallPwaButton />
             <router-link :to="{ name: 'login' }" class="btn btn-ghost btn-sm">Connexion</router-link>
@@ -316,7 +359,41 @@ onUnmounted(() => {
       </div>
       <div class="container hero-inner">
         <h1 data-reveal>Votre projet, du premier <em>devis</em> au jour J.</h1>
-        <p class="lede" data-reveal>InnovEvent réunit salles, décoration, traiteurs, formation et location de matériel dans un seul projet, coordonné du début à la fin.</p>
+        <p class="lede" data-reveal>Notre ambition est de faire de la plateforme une référence qui permet non seulement d’organiser un événement, mais aussi de louer une salle, de trouver un prestataire ou un talent, de concevoir un espace, de décorer un intérieur, d’acheter des objets et des équipements, de louer du matériel, de se former, de réserver une expérience, d’organiser un séjour ou de trouver une solution d’hébergement.</p>
+        <form class="landing-search" role="search" @submit.prevent="submitSearch">
+          <label class="sr-only" for="landing-search-input">Rechercher un service, une salle, du matériel ou une formation</label>
+          <i class="fa-solid fa-magnifying-glass landing-search-icon" aria-hidden="true"></i>
+          <input
+            id="landing-search-input"
+            v-model="searchQuery"
+            type="search"
+            autocomplete="off"
+            placeholder="Que recherchez-vous ? Salle, matériel, formation…"
+            aria-controls="landing-search-results"
+            :aria-expanded="searchOpen && searchQuery.trim().length >= 2"
+            @focus="searchOpen = true"
+            @input="searchOpen = true"
+            @keydown.esc="searchOpen = false"
+          />
+          <button type="submit" aria-label="Lancer la recherche"><i class="fa-solid fa-arrow-right"></i></button>
+          <div v-if="searchOpen && searchQuery.trim().length >= 2" id="landing-search-results" class="landing-search-results" role="listbox" aria-label="Résultats de recherche">
+            <template v-if="searchResults.length">
+              <template v-for="result in searchResults" :key="`${result.label}-${result.target || result.to?.name}`">
+                <router-link v-if="result.to" :to="result.to" class="landing-search-result" role="option" @click="searchOpen = false; searchQuery = ''">
+                  <span class="landing-search-result-icon"><i class="fa-solid fa-arrow-up-right-from-square"></i></span>
+                  <span><strong>{{ result.label }}</strong><small>{{ result.detail }}</small></span>
+                  <i class="fa-solid fa-chevron-right landing-search-chevron"></i>
+                </router-link>
+                <a v-else :href="result.target" class="landing-search-result" role="option" @click="searchOpen = false; searchQuery = ''">
+                  <span class="landing-search-result-icon"><i class="fa-solid fa-arrow-up-right-from-square"></i></span>
+                  <span><strong>{{ result.label }}</strong><small>{{ result.detail }}</small></span>
+                  <i class="fa-solid fa-chevron-right landing-search-chevron"></i>
+                </a>
+              </template>
+            </template>
+            <p v-else class="landing-search-empty">Aucun résultat pour « {{ searchQuery }} ». Essayez un autre terme.</p>
+          </div>
+        </form>
         <div class="hero-ctas" data-reveal>
           <router-link :to="{ name: 'register', query: { profile: 'talent' } }" class="btn btn-primary">Je cherche une mission</router-link>
           <router-link :to="{ name: 'register', query: { profile: 'client' } }" class="btn btn-ghost-light">Je cherche un service</router-link>
@@ -327,6 +404,42 @@ onUnmounted(() => {
           <div><strong>4</strong><span>gammes, de l'accessible au sur-mesure</span></div>
           <div><strong>1</strong><span>espace pour suivre tout le projet</span></div>
         </div>
+      </div>
+    </section>
+
+    <!-- ======================= QUI SOMMES-NOUS ======================= -->
+    <section class="section-pad about-section" id="apropos">
+      <div class="container">
+        <div ref="trustMetricsEl" class="trust-metrics" data-reveal aria-label="Quelques chiffres sur la plateforme InnovEvent">
+          <div class="trust-metrics-grid">
+            <div v-for="(metric, index) in TRUST_METRICS" :key="metric.key" class="trust-metric" :style="{ '--metric-index': index }">
+              <strong>{{ trustMetricValues[metric.key].toLocaleString('fr-FR') }}{{ metric.suffix }}</strong>
+              <span>{{ metric.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-head center" data-reveal style="max-width: 720px;">
+          <p class="kicker">Qui sommes-nous</p>
+          <h2 class="h-section">InnovEvent, la plateforme qui donne vie à vos projets</h2>
+          <p class="lede" style="margin: 0 auto;">
+            InnovEvent&amp;Home groupe réunit l’organisation événementielle, les services associés et la formation au sein d’un même écosystème. Avec ACAMED, nous accompagnons particuliers, entreprises et talents à chaque étape de leurs projets.
+          </p>
+        </div>
+
+        <div class="about-vision" data-reveal>
+          <span class="about-vision-kicker">Notre vision</span>
+          <p>Consolider notre position de référence nationale et régionale dans l'événementiel, le design et la formation professionnelle, en créant des expériences uniques, durables et porteuses de valeur économique, sociale et humaine.</p>
+        </div>
+
+        <div class="about-values-grid" data-reveal-group>
+          <div v-for="v in VALUES" :key="v.title" class="about-value-card">
+            <span class="about-value-icon"><i class="fa-solid" :class="v.icon"></i></span>
+            <h4>{{ v.title }}</h4>
+            <p>{{ v.text }}</p>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -348,114 +461,6 @@ onUnmounted(() => {
           <h3>Un suivi transparent</h3>
           <p>Réservations, billetterie et paiements centralisés dans votre espace client, à chaque étape.</p>
         </div>
-      </div>
-    </section>
-
-    <!-- ======================= CHIFFRES CLÉS ======================= -->
-    <section class="stats-band" ref="statsBandEl">
-      <div class="container stats-grid" data-reveal-group>
-        <div v-for="s in STATS" :key="s.key" class="stats-item">
-          <span class="stats-icon"><i class="fa-solid" :class="s.icon"></i></span>
-          <strong>{{ statsDisplay[s.key] }}{{ s.suffix }}</strong>
-          <span class="stats-label">{{ s.label }}</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======================= MARKETPLACE INNOVEVENT (inclut les anciens "Nos services") ======================= -->
-    <section class="section-pad marketplace-section" id="marketplace">
-      <div class="container">
-        <div class="section-head center" data-reveal style="max-width: 720px;">
-          <p class="kicker">Réservation en ligne</p>
-          <h2 class="h-section">Le Marketplace InnovEvent</h2>
-          <p class="lede" style="margin: 0 auto;">
-            Consultez la disponibilité et réservez directement salle, décoration, DJ, traiteur ou équipement — un
-            abonnement, un accès direct à un réseau de prestataires événementiels vérifiés, avec devis structuré et
-            échanges confidentiels, sans jamais quitter la plateforme.
-          </p>
-        </div>
-
-        <div class="services-grid" data-reveal-group>
-          <router-link
-            v-for="m in MARKETPLACE_ITEMS" :key="m.type"
-            :to="{ name: 'premium-marketplace', query: { type: m.type } }"
-            class="service-card"
-          >
-            <span class="service-card-icon"><i class="fa-solid" :class="m.icon"></i></span>
-            <h3>{{ m.title }}</h3>
-            <p>{{ m.text }}</p>
-            <span class="service-card-cta">Découvrir <i class="fa-solid fa-arrow-right"></i></span>
-          </router-link>
-        </div>
-
-        <div class="marketplace-benefits" data-reveal-group>
-          <div v-for="b in MARKETPLACE_BENEFITS" :key="b.text" class="marketplace-benefit">
-            <span class="marketplace-benefit-icon"><i class="fa-solid" :class="b.icon"></i></span>
-            <p>{{ b.text }}</p>
-          </div>
-        </div>
-
-        <div class="marketplace-cta" data-reveal>
-          <router-link :to="{ name: 'register' }" class="btn btn-primary">Créer mon compte gratuitement</router-link>
-          <router-link :to="{ name: 'premium-marketplace' }" class="text-link">Voir les formules d'abonnement <i class="fa-solid fa-arrow-right"></i></router-link>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======================= VOUS ÊTES PRESTATAIRE ? ======================= -->
-    <section class="section-pad provider-section" id="prestataires">
-      <div class="container provider-wrap">
-        <div class="provider-text" data-reveal>
-          <p class="kicker">Vous êtes prestataire ?</p>
-          <h2 class="h-section">Publiez votre profil, recevez des demandes</h2>
-          <p class="lede">
-            DJ, traiteur, décorateur, salle de réception, vente d'équipements... rejoignez le Marketplace InnovEvent
-            et faites-vous découvrir par des clients qui ont déjà un projet d'événement en cours.
-          </p>
-          <ul class="provider-benefits">
-            <li v-for="b in PROVIDER_BENEFITS" :key="b.text"><i class="fa-solid" :class="b.icon"></i>{{ b.text }}</li>
-          </ul>
-          <router-link :to="{ name: 'register', query: { profile: 'professionnel' } }" class="btn btn-primary">Devenir prestataire</router-link>
-        </div>
-        <div class="provider-card" data-reveal>
-          <span class="provider-card-icon"><i class="fa-solid fa-handshake"></i></span>
-          <h3>Compte Prestataire</h3>
-          <p>Un espace dédié pour gérer votre profil, vos services, vos devis et vos réservations — depuis un seul tableau de bord.</p>
-          <ul class="provider-card-list">
-            <li><i class="fa-solid fa-check"></i>Profil professionnel vérifié</li>
-            <li><i class="fa-solid fa-check"></i>Gestion des devis &amp; réservations</li>
-            <li><i class="fa-solid fa-check"></i>Suivi des paiements</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======================= QUI SOMMES-NOUS ======================= -->
-    <section class="section-pad about-section" id="apropos">
-      <div class="container">
-        <div class="section-head center" data-reveal style="max-width: 720px;">
-          <p class="kicker">Qui sommes-nous</p>
-          <h2 class="h-section">InnovEvent &amp; ACAMED, une double expertise</h2>
-          <p class="lede" style="margin: 0 auto;">
-            INNOVEVENT, en collaboration avec ACAMED (Académie des Métiers de l'Événementiel et du Design), conçoit,
-            planifie et organise des événements à forte valeur ajoutée pour les entreprises, institutions,
-            associations et particuliers — et forme les talents de demain aux métiers de l'événementiel et du design.
-          </p>
-        </div>
-
-        <div class="about-vision" data-reveal>
-          <span class="about-vision-kicker">Notre vision</span>
-          <p>Devenir une référence nationale et régionale dans l'événementiel, le design et la formation professionnelle, en créant des expériences uniques, durables et porteuses de valeur économique, sociale et humaine.</p>
-        </div>
-
-        <div class="about-values-grid" data-reveal-group>
-          <div v-for="v in VALUES" :key="v.title" class="about-value-card">
-            <span class="about-value-icon"><i class="fa-solid" :class="v.icon"></i></span>
-            <h4>{{ v.title }}</h4>
-            <p>{{ v.text }}</p>
-          </div>
-        </div>
-
       </div>
     </section>
 
@@ -545,26 +550,71 @@ onUnmounted(() => {
             <div class="pole-card-icon"><i class="fa-solid fa-bag-shopping"></i></div>
             <h4>Shop</h4>
             <p>Objets déco, mobilier et équipements événementiels à commander en ligne.</p>
-            <a href="#shop" class="text-link">Voir la boutique</a>
+            <router-link :to="{ name: 'premium-marketplace', query: { type: 'sale' } }" class="text-link">Voir la boutique</router-link>
           </div>
           <div class="pole-card" id="travel">
             <div class="pole-card-icon"><i class="fa-solid fa-plane"></i></div>
             <h4>Travel</h4>
             <p>Circuits, excursions et expériences touristiques à associer à votre événement.</p>
-            <a href="#travel" class="text-link">Voir les expériences</a>
+            <span class="pole-card-status">Catalogue bientôt disponible</span>
           </div>
           <div class="pole-card" id="stay">
             <div class="pole-card-icon"><i class="fa-solid fa-bed"></i></div>
             <h4>Stay</h4>
             <p>Hébergements pour vos invités, avant, pendant et après l'événement.</p>
-            <a href="#stay" class="text-link">Voir les hébergements</a>
+            <span class="pole-card-status">Catalogue bientôt disponible</span>
           </div>
           <div class="pole-card" id="experiences">
             <div class="pole-card-icon"><i class="fa-solid fa-champagne-glasses"></i></div>
             <h4>Experiences</h4>
             <p>Moments immersifs et activités sur-mesure à intégrer à votre événement — bientôt disponible.</p>
-            <a href="#experiences" class="text-link">En savoir plus</a>
+            <span class="pole-card-status">Catalogue bientôt disponible</span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= LOCATION MATÉRIEL (dossier accessoire) ======================= -->
+    <section class="section-pad" id="location">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <p class="kicker">Location de matériel</p>
+          <h2 class="h-section">Location de matériel événementiel</h2>
+          <p class="lede">Disponibilité vérifiée en temps réel au moment de la réservation, chaque référence est administrée indépendamment.</p>
+        </div>
+        <div class="equip-grid" data-reveal-group>
+          <template v-if="loading.equipment">
+            <div v-for="i in 3" :key="i" class="equip-card media-skeleton" style="height: 240px;"></div>
+          </template>
+          <template v-else-if="sections.equipment.length">
+            <div v-for="item in sections.equipment" :key="item.id" class="equip-card">
+              <div class="media-photo is-clickable" @click="openLightbox(item)">
+                <img v-if="item.photo" :src="item.photo" :alt="item.label" />
+                <i v-else class="fa-solid fa-sliders"></i>
+                <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
+              </div>
+              <div class="equip-card-body">
+                <h4>{{ item.label }}</h4>
+                <div class="equip-stars"><i class="fa-solid fa-star" v-for="n in 5" :key="n"></i></div>
+                <p>{{ item.caption }}</p>
+                <div class="equip-card-foot">
+                  <span v-if="item.price_label" class="equip-price">{{ item.price_label }}</span>
+                  <router-link :to="{ name: 'register' }" class="equip-reserve-btn">
+                    Réserver <i class="fa-solid fa-arrow-right"></i>
+                  </router-link>
+                </div>
+              </div>
+            </div>
+          </template>
+          <p v-else class="media-empty">Catalogue matériel bientôt en ligne.</p>
+        </div>
+        <div class="equipment-delivery" data-reveal>
+          <span class="equipment-delivery-icon"><i class="fa-solid fa-truck-fast" aria-hidden="true"></i></span>
+          <div class="equipment-delivery-copy">
+            <h3>Faites-vous livrer votre matériel</h3>
+            <p>Après votre réservation, demandez une livraison en indiquant l’adresse et la date souhaitées, puis suivez son acheminement depuis votre compte.</p>
+          </div>
+          <router-link :to="{ name: 'public-equipment' }" class="btn btn-primary btn-sm">Choisir du matériel <i class="fa-solid fa-arrow-right"></i></router-link>
         </div>
       </div>
     </section>
@@ -609,7 +659,7 @@ onUnmounted(() => {
       <div class="container">
         <div class="section-head" data-reveal>
           <p class="kicker">InnovEvent Academy</p>
-          <h2 class="h-section">Se former aux métiers de l'événementiel</h2>
+          <h2 class="h-section">Se former aux métiers de l'événementiel et du design d'intérieur</h2>
           <p class="lede">Sessions en présentiel, inscriptions et paiement en tranches en ligne, attestation délivrée en fin de formation.</p>
         </div>
         <div class="academy-grid" data-reveal-group>
@@ -698,6 +748,30 @@ onUnmounted(() => {
           <h2 class="h-section">Des formules claires, pour chaque budget</h2>
           <p class="lede" style="margin: 0 auto;">Chaque pack précise le tarif et ce qui est inclus — géré et mis à jour par l'administration.</p>
         </div>
+        <div class="gammes gammes-inline">
+          <div class="section-head center" data-reveal style="max-width: 560px;">
+            <p class="kicker" style="color: var(--slate-light);">Quel que soit votre budget</p>
+            <h2 class="h-section" style="color: #fff;">Quatre gammes, un même niveau d'exigence</h2>
+          </div>
+          <div class="gammes-grid" data-reveal-group>
+            <div class="gamme-item">
+              <h4>Accessible</h4>
+              <p>L'essentiel pour organiser un événement réussi, sans dépasser un budget serré.</p>
+            </div>
+            <div class="gamme-item">
+              <h4>Standard / Confort</h4>
+              <p>Un bon équilibre entre qualité de prestation et maîtrise du budget.</p>
+            </div>
+            <div class="gamme-item">
+              <h4>Premium</h4>
+              <p>Des prestataires et un niveau de finition choisis pour les événements exigeants.</p>
+            </div>
+            <div class="gamme-item">
+              <h4>Luxe / Sur mesure</h4>
+              <p>Une conception entièrement personnalisée, sans compromis, pilotée de bout en bout.</p>
+            </div>
+          </div>
+        </div>
         <div class="pack-grid" data-reveal-group>
           <template v-if="loading.packs">
             <div v-for="i in 3" :key="i" class="pack-card media-skeleton" style="height: 340px;"></div>
@@ -731,39 +805,36 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- ======================= LOCATION MATÉRIEL (dossier accessoire) ======================= -->
-    <section class="section-pad" id="location">
+    <!-- ======================= MARKETPLACE INNOVEVENT ======================= -->
+    <section class="section-pad marketplace-section" id="marketplace">
       <div class="container">
-        <div class="section-head" data-reveal>
-          <p class="kicker">Location de matériel</p>
-          <h2 class="h-section">Location de matériel événementiel</h2>
-          <p class="lede">Disponibilité vérifiée en temps réel au moment de la réservation, chaque référence est administrée indépendamment.</p>
+        <div class="section-head center" data-reveal style="max-width: 720px;">
+          <p class="kicker">Après la découverte de nos services</p>
+          <h2 class="h-section">Choisissez votre Marketplace</h2>
+          <p class="lede" style="margin: 0 auto;">
+            Chaque Marketplace rassemble une offre précise. Choisissez celle qui correspond à votre besoin :
+            nous vous présenterons son fonctionnement avant de créer votre espace client.
+          </p>
         </div>
-        <div class="equip-grid" data-reveal-group>
-          <template v-if="loading.equipment">
-            <div v-for="i in 3" :key="i" class="equip-card media-skeleton" style="height: 240px;"></div>
-          </template>
-          <template v-else-if="sections.equipment.length">
-            <div v-for="item in sections.equipment" :key="item.id" class="equip-card">
-              <div class="media-photo is-clickable" @click="openLightbox(item)">
-                <img v-if="item.photo" :src="item.photo" :alt="item.label" />
-                <i v-else class="fa-solid fa-sliders"></i>
-                <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
-              </div>
-              <div class="equip-card-body">
-                <h4>{{ item.label }}</h4>
-                <div class="equip-stars"><i class="fa-solid fa-star" v-for="n in 5" :key="n"></i></div>
-                <p>{{ item.caption }}</p>
-                <div class="equip-card-foot">
-                  <span v-if="item.price_label" class="equip-price">{{ item.price_label }}</span>
-                  <router-link :to="{ name: 'register' }" class="equip-reserve-btn">
-                    Réserver <i class="fa-solid fa-arrow-right"></i>
-                  </router-link>
-                </div>
-              </div>
-            </div>
-          </template>
-          <p v-else class="media-empty">Catalogue matériel bientôt en ligne.</p>
+
+        <div class="services-grid" data-reveal-group>
+          <router-link
+            v-for="m in MARKETPLACE_ITEMS" :key="m.type"
+            :to="{ name: 'register', query: { profile: 'client', marketplace: m.type } }"
+            class="service-card"
+          >
+            <span class="service-card-icon"><i class="fa-solid" :class="m.icon"></i></span>
+            <h3>{{ m.title }}</h3>
+            <p>{{ m.text }}</p>
+            <span class="service-card-cta">Choisir cette Marketplace <i class="fa-solid fa-arrow-right"></i></span>
+          </router-link>
+        </div>
+
+        <div class="marketplace-benefits" data-reveal-group>
+          <div v-for="b in MARKETPLACE_BENEFITS" :key="b.text" class="marketplace-benefit">
+            <span class="marketplace-benefit-icon"><i class="fa-solid" :class="b.icon"></i></span>
+            <p>{{ b.text }}</p>
+          </div>
         </div>
       </div>
     </section>
@@ -797,34 +868,6 @@ onUnmounted(() => {
           <div class="project-total">
             <span>Coût estimatif du projet</span>
             <strong>3 400 000 FCFA</strong>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======================= GAMMES ======================= -->
-    <section class="section-pad gammes">
-      <div class="container">
-        <div class="section-head center" data-reveal style="max-width: 560px;">
-          <p class="kicker" style="color: var(--slate-light);">Quel que soit votre budget</p>
-          <h2 class="h-section" style="color: #fff;">Quatre gammes, un même niveau d'exigence</h2>
-        </div>
-        <div class="gammes-grid" data-reveal-group>
-          <div class="gamme-item">
-            <h4>Accessible</h4>
-            <p>L'essentiel pour organiser un événement réussi, sans dépasser un budget serré.</p>
-          </div>
-          <div class="gamme-item">
-            <h4>Standard / Confort</h4>
-            <p>Un bon équilibre entre qualité de prestation et maîtrise du budget.</p>
-          </div>
-          <div class="gamme-item">
-            <h4>Premium</h4>
-            <p>Des prestataires et un niveau de finition choisis pour les événements exigeants.</p>
-          </div>
-          <div class="gamme-item">
-            <h4>Luxe / Sur mesure</h4>
-            <p>Une conception entièrement personnalisée, sans compromis, pilotée de bout en bout.</p>
           </div>
         </div>
       </div>
@@ -921,8 +964,8 @@ onUnmounted(() => {
       <div class="container footer-top">
         <div class="footer-brand">
           <span class="logo" style="display: inline-flex;">
-            <img :src="logoMark" alt="InnovEvent" class="logo-icon" />
-            <span class="logo-word">InnovEvent<span class="grp">Group</span></span>
+            <img :src="logoMark" alt="InnovEvent&amp;Home groupe" class="logo-icon" />
+            <span class="logo-word">InnovEvent&amp;Home <span class="grp">groupe</span></span>
           </span>
           <p>Events · Home · Design · Academy · Shop · Travel · Stay — un seul écosystème pour organiser, décorer et vivre vos projets.</p>
           <div class="footer-social">
@@ -964,7 +1007,7 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="container footer-bottom">
-        <span>© 2026 InnovEvent Group. Tous droits réservés.</span>
+        <span>© 2026 InnovEvent&amp;Home groupe. Tous droits réservés.</span>
       </div>
     </footer>
 
@@ -1018,6 +1061,8 @@ onUnmounted(() => {
 .ie-land p { margin: 0; }
 .ie-land .container { max-width: 1200px; margin: 0 auto; padding: 0 var(--gutter); }
 .ie-land section { position: relative; }
+.ie-land section[id] { scroll-margin-top: 96px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .section-pad { padding: 88px 0; }
 @media (max-width: 720px) { .section-pad { padding: 56px 0; } }
 
@@ -1118,7 +1163,7 @@ onUnmounted(() => {
 .hero-ph.is-active { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .hero-ph { transition: none; } }
 .hero-scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(45, 10, 13, 0.55) 0%, rgba(45, 10, 13, 0.72) 55%, rgba(45, 10, 13, 0.9) 100%); }
-.hero-inner { position: relative; padding: 150px 0 110px; max-width: 720px; }
+.hero-inner { position: relative; z-index: 1; padding: 126px 0 92px; max-width: 720px; }
 .hero h1 { color: #fff; font-size: clamp(2.3rem, 5vw, 3.6rem); line-height: 1.08; font-weight: 500; letter-spacing: -0.01em; }
 .hero h1 em {
   position: relative; font-style: italic; color: var(--slate-light); font-weight: 400;
@@ -1140,6 +1185,23 @@ onUnmounted(() => {
 .hero-inner .hero-stats[data-reveal] { transition-delay: 0.52s; }
 .hero-stats div strong { display: block; font-family: var(--display); font-size: 1.7rem; font-weight: 500; color: #fff; }
 .hero-stats div span { font-size: 0.82rem; color: rgba(255, 255, 255, 0.72); }
+.landing-search { position: relative; z-index: 5; display: flex; align-items: center; gap: 12px; width: min(100%, 570px); min-height: 58px; margin: 0 0 24px; padding: 6px 7px 6px 18px; border: 1px solid rgba(255,255,255,.22); border-radius: 11px; background: #fff; box-shadow: 0 13px 34px rgba(15,20,25,.2); }
+.landing-search-icon { flex: 0 0 auto; color: var(--wine); font-size: 15px; }
+.landing-search input { width: 100%; min-width: 0; padding: 9px 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: .9rem; }
+.landing-search input::placeholder { color: #89939a; }
+.landing-search:focus-within { outline: 3px solid rgba(192,39,45,.3); outline-offset: 2px; }
+.landing-search > button { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; border: 0; border-radius: 8px; background: var(--wine); color: #fff; cursor: pointer; transition: background .2s, transform .2s; }
+.landing-search > button:hover { transform: translateX(1px); background: var(--wine-dark); }
+.landing-search-results { position: absolute; top: calc(100% + 9px); right: 0; left: 0; max-height: 360px; overflow-y: auto; padding: 7px; border: 1px solid rgba(30,42,51,.1); border-radius: 12px; background: #fff; box-shadow: 0 20px 48px rgba(10,15,20,.24); color: var(--ink); }
+.landing-search-result { display: flex; align-items: center; gap: 12px; padding: 11px; border-radius: 8px; color: var(--ink) !important; text-decoration: none; transition: background .15s ease; }
+.landing-search-result:hover, .landing-search-result:focus-visible { background: #f7f3f1; outline: none; }
+.landing-search-result-icon { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border-radius: 9px; background: var(--wine-tint); color: var(--wine); font-size: 12px; }
+.landing-search-result > span:nth-child(2) { min-width: 0; flex: 1; }
+.landing-search-result strong, .landing-search-result small { display: block; }
+.landing-search-result strong { font-size: .85rem; font-weight: 700; }
+.landing-search-result small { overflow: hidden; margin-top: 2px; color: var(--muted); font-size: .73rem; text-overflow: ellipsis; white-space: nowrap; }
+.landing-search-chevron { color: #98a1a9; font-size: 10px; }
+.landing-search-empty { padding: 16px 12px !important; color: var(--ink-soft); font-size: .84rem; }
 
 /* Nos services */
 .services-section { background: var(--paper); }
@@ -1184,30 +1246,25 @@ onUnmounted(() => {
 @media (max-width: 860px) { .marketplace-benefits { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .marketplace-benefits { grid-template-columns: 1fr; } }
 
-/* Vous êtes prestataire ? */
-.provider-section { background: var(--paper); }
-.provider-wrap { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 56px; align-items: center; }
-.provider-text .lede { margin: 14px 0 24px; }
-.provider-benefits { list-style: none; margin: 0 0 28px; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.provider-benefits li { display: flex; align-items: flex-start; gap: 12px; font-size: 0.92rem; color: var(--ink-soft); line-height: 1.4; }
-.provider-benefits li i { color: var(--wine); font-size: 15px; margin-top: 2px; flex-shrink: 0; width: 18px; }
-.provider-card {
-  background: var(--ink); background-image: radial-gradient(120% 140% at 100% 0%, rgba(192, 39, 45, 0.18), transparent 55%);
-  color: #fff; border-radius: 20px; padding: 44px 38px;
-  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
-}
-.provider-card-icon {
-  width: 56px; height: 56px; border-radius: 14px; background: var(--wine); color: #fff;
-  display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 8px;
-}
-.provider-card h3 { color: #fff; font-size: 1.25rem; font-weight: 600; margin: 0; }
-.provider-card p { color: rgba(255, 255, 255, 0.78); font-size: 0.9rem; line-height: 1.55; margin: 0 0 8px; }
-.provider-card-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; width: 100%; }
-.provider-card-list li { display: flex; align-items: center; gap: 10px; font-size: 0.88rem; color: rgba(255, 255, 255, 0.92); padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.12); }
-.provider-card-list li i { color: var(--wine); font-size: 12px; }
-@media (max-width: 860px) { .provider-wrap { grid-template-columns: 1fr; gap: 32px; } }
-
 /* Qui sommes-nous */
+.trust-metrics {
+  max-width: 1040px; margin: 0 auto 56px; padding: 30px 34px; border-radius: 14px;
+  background: linear-gradient(135deg, #fff 0%, #f1f2f3 100%); color: var(--ink);
+  border: 1px solid var(--stone-line); box-shadow: 0 14px 34px rgba(30, 42, 51, 0.07);
+}
+.trust-metrics-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.trust-metric { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 18px; text-align: center; animation: metric-rise 0.55s var(--ease) both; animation-delay: calc(var(--metric-index) * 90ms); }
+.trust-metric + .trust-metric { border-left: 1px solid var(--stone-line); }
+.trust-metric strong { color: var(--wine); font-family: var(--display); font-size: clamp(2.2rem, 4vw, 3.25rem); font-weight: 600; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.trust-metric span { color: var(--ink-soft); font-size: 0.9rem; line-height: 1.45; }
+@keyframes metric-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 720px) {
+  .trust-metrics { padding: 26px 18px; margin-bottom: 46px; }
+  .trust-metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 25px 0; }
+  .trust-metric:nth-child(3) { border-left: 0; }
+}
+@media (max-width: 420px) { .trust-metric { padding: 0 8px; } .trust-metric span { font-size: 0.82rem; } }
+@media (prefers-reduced-motion: reduce) { .trust-metric { animation: none; } }
 .about-vision {
   max-width: 760px; margin: 0 auto 48px; padding: 30px 36px; border-radius: 12px;
   background: var(--wine-tint); border-left: 4px solid var(--wine);
@@ -1259,21 +1316,6 @@ onUnmounted(() => {
   .value-item:first-child { border-top: none; }
 }
 
-/* Chiffres clés */
-.stats-band { background: var(--ink); padding: 56px 0; }
-.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
-.stats-item { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; }
-.stats-icon {
-  width: 48px; height: 48px; border-radius: 50%; background: rgba(192, 39, 45, 0.16); color: var(--wine);
-  display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
-}
-.stats-item strong {
-  font-family: var(--display); font-size: clamp(1.9rem, 3vw, 2.4rem); font-weight: 600; color: #fff;
-  font-variant-numeric: tabular-nums; line-height: 1;
-}
-.stats-label { font-size: 0.9rem; color: rgba(255, 255, 255, 0.68); max-width: 22ch; }
-@media (max-width: 720px) { .stats-grid { grid-template-columns: 1fr; gap: 28px; } }
-
 /* Pôles */
 .poles-feature { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; margin-bottom: 56px; }
 .poles-feature-photo { aspect-ratio: 4/3; border-radius: 10px; overflow: hidden; background: var(--stone); }
@@ -1298,6 +1340,7 @@ onUnmounted(() => {
 .pole-card h4 { font-size: 1.15rem; font-weight: 600; }
 .pole-card p { color: var(--ink-soft); font-size: 0.9rem; flex-grow: 1; }
 .pole-card .text-link { font-size: 0.86rem; align-self: flex-start; }
+.pole-card-status { align-self: flex-start; color: var(--muted); font-size: 0.82rem; font-weight: 600; }
 @media (max-width: 860px) {
   .poles-feature { grid-template-columns: 1fr; gap: 28px; }
   .poles-grid { grid-template-columns: 1fr 1fr; }
@@ -1426,6 +1469,12 @@ onUnmounted(() => {
 
 /* Équipement */
 .equip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.equipment-delivery { display: flex; align-items: center; gap: 18px; margin-top: 32px; padding: 22px 24px; border: 1px solid var(--stone-line); border-radius: 14px; background: var(--cream); }
+.equipment-delivery-icon { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; border-radius: 13px; background: var(--wine-tint); color: var(--wine); font-size: 18px; }
+.equipment-delivery-copy { flex: 1; }
+.equipment-delivery-copy h3 { margin: 0 0 4px; font-size: 1rem; font-weight: 700; }
+.equipment-delivery-copy p { margin: 0; color: var(--ink-soft); font-size: .87rem; line-height: 1.55; }
+@media (max-width: 640px) { .equipment-delivery { align-items: flex-start; flex-wrap: wrap; } .equipment-delivery-copy { flex-basis: calc(100% - 66px); } .equipment-delivery > .btn { margin-left: 66px; } }
 .equip-card { background: var(--paper); border: 1px solid var(--stone-line); border-radius: 10px; overflow: hidden; transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease); }
 .equip-card:hover { transform: translateY(-4px); box-shadow: 0 18px 40px rgba(30, 42, 51, 0.1); }
 .equip-card .media-photo { border-radius: 0; }
@@ -1470,6 +1519,7 @@ onUnmounted(() => {
 
 /* Gammes */
 .gammes { background: var(--ink); color: #fff; }
+.gammes-inline { margin: 36px 0 44px; padding: 30px 24px; border-radius: 14px; }
 .gammes-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
 .gamme-item { padding: 36px 30px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
 .gamme-item:first-child { border-left: none; }
@@ -1484,6 +1534,7 @@ onUnmounted(() => {
   .gammes-grid { grid-template-columns: 1fr; }
   .gamme-item { border-left: none !important; border-top: 1px solid rgba(255, 255, 255, 0.14); }
   .gamme-item:first-child { border-top: none; }
+  .gammes-inline { margin: 28px 0 34px; padding: 26px 18px; }
 }
 
 /* Témoignages */

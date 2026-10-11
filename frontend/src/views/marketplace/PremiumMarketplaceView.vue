@@ -35,7 +35,7 @@ const router = useRouter();
 const toast = useToastStore();
 
 const loading = ref(true);
-const info = reactive({ price: 0, currency: "XAF", duration_days: 30, plans: [], marketplaces: [], tiers: [] });
+const info = reactive({ price: 0, currency: "XAF", duration_days: 30, plans: [], marketplaces: [], tiers: [], demo_mode: false });
 // Permet un lien direct depuis la sidebar (« Marketplace des acteurs » → un
 // métier précis) : ?type=actors&category=dj ouvre directement le catalogue de
 // ce métier, sans repasser par l'index des blocs.
@@ -899,6 +899,7 @@ watch(
       :marketplace-label="checkoutMarketplace.marketplace_label"
       :plans="info.plans"
       :tiers="info.tiers"
+      :demo-mode="info.demo_mode"
       @close="checkoutMarketplace = null"
       @subscribed="handleSubscribed"
     />

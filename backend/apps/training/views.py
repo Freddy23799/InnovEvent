@@ -8,7 +8,7 @@ from rest_framework.response import Response
 
 from apps.accounts.permissions import IsAdmin, IsAdminOrReadOnly
 from apps.audit.utils import log_action
-from apps.payments.gateways import PaymentGatewayError, get_gateway
+from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
 from apps.payments.models import Payment
 
 from .models import Badge, Certificate, Enrollment, Settlement, Training, TrainingFormula
@@ -96,7 +96,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         if amount > enrollment.balance:
             return Response({"detail": f"Le montant dépasse le solde restant ({enrollment.balance} XAF)."}, status=status.HTTP_400_BAD_REQUEST)
 
-        payment = Payment.objects.create(user=request.user, amount=amount, currency="XAF", provider=provider, purpose="training_fee")
+        payment = Payment.objects.create(user=request.user, amount=amount, currency="XAF", provider=get_effective_provider(provider), purpose="training_fee")
         try:
             gateway = get_gateway(provider)
             success, provider_reference, raw_response = gateway.charge(payment)

@@ -11,6 +11,7 @@ const props = defineProps({
   marketplaceLabel: { type: String, required: true },
   plans: { type: Array, required: true },
   tiers: { type: Array, default: () => [] },
+  demoMode: { type: Boolean, default: false },
 });
 const emit = defineEmits(["close", "subscribed"]);
 
@@ -22,10 +23,13 @@ const PAYMENT_METHODS = [
   { value: "card", label: "Carte bancaire", logos: [visaLogo, mastercardLogo] },
   { value: "paypal", label: "PayPal", logos: [] },
 ];
+const DEMO_PAYMENT_METHODS = [
+  { value: "demo", label: "Paiement de démonstration", logos: [] },
+];
 
 const selectedPlanCode = ref(props.plans.find((p) => p.code === "1_month")?.code || props.plans[0]?.code);
 const selectedTierId = ref(props.tiers.find((tr) => tr.is_default)?.id ?? props.tiers[0]?.id ?? null);
-const selectedPayment = ref("mtn_momo");
+const selectedPayment = ref(props.demoMode ? "demo" : "mtn_momo");
 const phoneNumber = ref("");
 const submitting = ref(false);
 const errorMessage = ref("");
@@ -36,8 +40,9 @@ const monthlyEquivalent = computed(() => {
   if (!selectedPlan.value) return 0;
   return Math.round(selectedPlan.value.price / selectedPlan.value.months);
 });
-const requiresPhone = computed(() => selectedPayment.value === "mtn_momo" || selectedPayment.value === "orange_money");
-const requiresCard = computed(() => selectedPayment.value === "card");
+const paymentMethods = computed(() => props.demoMode ? DEMO_PAYMENT_METHODS : PAYMENT_METHODS);
+const requiresPhone = computed(() => !props.demoMode && (selectedPayment.value === "mtn_momo" || selectedPayment.value === "orange_money"));
+const requiresCard = computed(() => !props.demoMode && selectedPayment.value === "card");
 const cardFields = reactive({ number: "", expiry: "", cvv: "", name: "" });
 
 // Un abonnement en cours change de méthode de paiement : on efface les
@@ -133,15 +138,18 @@ async function confirmSubscription() {
 
         <section class="ie-checkout-section">
           <h3>3. Choisissez votre moyen de paiement</h3>
+          <p v-if="demoMode" class="ie-alert ie-alert-warning">
+            Mode test : aucun argent ne sera débité. Le paiement sera simulé et l'abonnement activé pour vérifier le parcours.
+          </p>
           <div class="ie-checkout-payments">
             <button
-              v-for="method in PAYMENT_METHODS" :key="method.value" type="button"
+              v-for="method in paymentMethods" :key="method.value" type="button"
               class="ie-checkout-payment" :class="{ 'is-selected': selectedPayment === method.value }"
               @click="selectedPayment = method.value"
             >
               <div class="ie-checkout-payment-logos">
                 <img v-for="(logo, i) in method.logos" :key="i" :src="logo" :alt="method.label" />
-                <i v-if="!method.logos.length" class="fa-brands fa-paypal"></i>
+                <i v-if="!method.logos.length" :class="method.value === 'paypal' ? 'fa-brands fa-paypal' : 'fa-solid fa-flask'"></i>
               </div>
               <span>{{ method.label }}</span>
             </button>
@@ -184,7 +192,7 @@ async function confirmSubscription() {
             <strong>{{ selectedPlan ? Number(selectedPlan.price).toLocaleString('fr-FR') : 0 }} XAF</strong>
           </div>
           <button type="button" class="ie-btn ie-btn-primary ie-checkout-submit" :disabled="submitting || !canSubmit" @click="confirmSubscription">
-            <i class="fa-solid fa-lock"></i> {{ submitting ? "Paiement en cours…" : `Payer ${selectedPlan ? Number(selectedPlan.price).toLocaleString('fr-FR') : 0} XAF` }}
+            <i :class="demoMode ? 'fa-solid fa-flask' : 'fa-solid fa-lock'"></i> {{ submitting ? "Paiement en cours…" : `${demoMode ? 'Simuler le paiement de' : 'Payer'} ${selectedPlan ? Number(selectedPlan.price).toLocaleString('fr-FR') : 0} XAF` }}
           </button>
           <p class="ie-checkout-secure"><i class="fa-solid fa-shield-halved"></i> Paiement sécurisé — aucune donnée bancaire n'est stockée sur InnovEvent.</p>
         </div>

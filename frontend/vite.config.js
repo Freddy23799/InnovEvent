@@ -9,12 +9,12 @@ export default defineConfig({
       registerType: "autoUpdate",
       injectRegister: "auto",
       devOptions: {
-        enabled: true,
+        enabled: false,
       },
       includeAssets: ["favicon.png"],
       manifest: {
-        name: "InnovEvent Group",
-        short_name: "InnovEvent",
+        name: "InnovEvent&Home groupe",
+        short_name: "InnovEvent&Home",
         description: "Organisation d'événements, réservations, billetterie et formations — du premier devis au jour J.",
         lang: "fr",
         start_url: "/",

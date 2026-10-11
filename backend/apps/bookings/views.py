@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsAdminClientOrOrganizer
 from apps.audit.utils import log_action
 from apps.notifications.services import notify_booking_created, notify_booking_status_changed, send_booking_receipt_email
-from apps.payments.gateways import PaymentGatewayError, get_gateway
+from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
 from apps.payments.models import Payment
 from apps.referrals.services import apply_coupon, redeem_coupon
 
@@ -104,7 +104,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 amount, _discount, coupon = apply_coupon(coupon_code, request.user, cost, context)
 
             payment = Payment.objects.create(
-                user=request.user, amount=amount, currency="XAF", provider=provider, purpose="booking",
+                user=request.user, amount=amount, currency="XAF", provider=get_effective_provider(provider), purpose="booking",
             )
             try:
                 gateway = get_gateway(provider)

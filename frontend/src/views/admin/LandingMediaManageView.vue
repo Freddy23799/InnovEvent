@@ -143,7 +143,7 @@ onMounted(() => {
     <div class="ie-page-header">
       <div>
         <h1><i class="fa-solid fa-images" style="color: var(--ie-red); margin-right: 8px;"></i>Photothèque page d'accueil</h1>
-        <p class="ie-page-subtitle">Gérez les photos affichées sur la page publique InnovEvent Group, par catégorie.</p>
+        <p class="ie-page-subtitle">Gérez les photos affichées sur la page publique InnovEvent&amp;Home groupe, par catégorie.</p>
       </div>
       <div class="ie-page-header-actions">
         <button class="ie-btn ie-btn-primary" @click="showForm ? (showForm = false) : startCreate()">

@@ -26,7 +26,7 @@ from apps.notifications.services import (
     notify_quote_paid,
     notify_quote_sent,
 )
-from apps.payments.gateways import PaymentGatewayError, get_gateway
+from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
 from apps.payments.models import Payment
 from apps.referrals.services import apply_coupon, redeem_coupon
 
@@ -233,7 +233,7 @@ class MarketplaceOrderPaymentView(APIView):
             user=request.user,
             amount=cost,
             currency=listing.currency,
-            provider=data["payment_provider"],
+            provider=get_effective_provider(data["payment_provider"]),
             purpose="marketplace_order",
         )
         order = MarketplaceOrder.objects.create(
@@ -311,6 +311,7 @@ class MarketplaceSubscriptionView(APIView):
         default_plan = plan_rows[0] if plan_rows else None
         tiers = SubscriptionTierSerializer(SubscriptionTier.objects.all(), many=True).data
         return Response({
+            "demo_mode": settings.PAYMENTS_DEMO_MODE,
             # Conservés pour compatibilité (formule la moins chère par défaut).
             "price": default_plan.price if default_plan else 0,
             "currency": "XAF",
@@ -339,7 +340,7 @@ class MarketplaceSubscriptionView(APIView):
             user=request.user,
             amount=plan.price,
             currency="XAF",
-            provider=provider,
+            provider=get_effective_provider(provider),
             purpose="marketplace_subscription",
         )
 
@@ -1060,7 +1061,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
 
             payment = Payment.objects.create(
                 user=request.user, amount=amount, currency=quote.currency,
-                provider=provider, purpose="marketplace_quote",
+                provider=get_effective_provider(provider), purpose="marketplace_quote",
             )
             try:
                 gateway = get_gateway(provider)

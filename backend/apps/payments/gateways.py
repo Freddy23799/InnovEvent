@@ -83,7 +83,16 @@ GATEWAYS = {
 def get_gateway(provider: str) -> BasePaymentGateway:
     if settings.PAYMENTS_DEMO_MODE:
         return DemoGateway()
+    if provider == "demo":
+        raise PaymentGatewayError(
+            "Le paiement de démonstration est désactivé. Choisissez un moyen de paiement disponible."
+        )
     gateway_class = GATEWAYS.get(provider)
     if not gateway_class:
         raise PaymentGatewayError("Le moyen de paiement choisi n'est pas reconnu. Choisissez un moyen proposé.")
     return gateway_class()
+
+
+def get_effective_provider(provider: str) -> str:
+    """Nom du moyen réellement utilisé, pour que l'historique reste exact."""
+    return "demo" if settings.PAYMENTS_DEMO_MODE else provider

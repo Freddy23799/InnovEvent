@@ -60,9 +60,11 @@ docker compose up --build
 Le fichier `backend/.env.example` est réglé pour un déploiement derrière HTTPS.
 Pour un lancement local en HTTP, mettez `DJANGO_DEBUG=True` et ajoutez
 `http://localhost:5173` à `CORS_ALLOWED_ORIGINS` si le frontend Vite appelle
-directement l'API. Pour les paiements simulés locaux, mettez aussi
-`PAYMENTS_DEMO_MODE=True`. Avant toute mise en production, remettez `DJANGO_DEBUG=False`,
-`PAYMENTS_DEMO_MODE=False` et configurez l'ingress HTTPS décrit dans
+directement l'API. Les paiements sont simulés par défaut dans tous les
+environnements (`PAYMENTS_DEMO_MODE=True`). Pour activer ultérieurement les
+passerelles réelles, configurez explicitement `PAYMENTS_DEMO_MODE=False` après
+leur intégration. Avant toute mise en production, gardez `DJANGO_DEBUG=False`
+et configurez l'ingress HTTPS décrit dans
 [`SECURITY.md`](SECURITY.md). Le proxy Nginx fourni ne termine pas TLS.
 
 Au premier démarrage sur une base vide, le backend crée automatiquement un super-administrateur

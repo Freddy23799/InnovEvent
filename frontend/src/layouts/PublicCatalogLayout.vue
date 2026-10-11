@@ -6,8 +6,8 @@ import logo from "../assets/images/logo-mark.png";
   <div class="ie-public-shell">
     <header class="ie-public-header">
       <router-link :to="{ name: 'landing' }" class="ie-public-brand">
-        <img :src="logo" alt="InnovEvent" />
-        <span>InnovEvent<em>Group</em></span>
+        <img :src="logo" alt="InnovEvent&amp;Home groupe" />
+        <span>InnovEvent&amp;Home <em>groupe</em></span>
       </router-link>
       <div class="ie-public-actions">
         <router-link :to="{ name: 'landing' }" class="ie-btn ie-btn-ghost ie-btn-sm">

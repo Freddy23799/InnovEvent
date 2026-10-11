@@ -76,7 +76,7 @@ onMounted(loadData);
     <div class="ie-page-header">
       <div>
         <h1><i class="fa-solid fa-briefcase" style="color: var(--ie-red); margin-right: 8px;"></i>Rejoindre l'équipe</h1>
-        <p class="ie-page-subtitle">Envoyez votre candidature (CV + informations) pour postuler à un poste chez InnovEvent-GS.</p>
+        <p class="ie-page-subtitle">Envoyez votre candidature (CV + informations) pour postuler à un poste chez InnovEvent&amp;Home groupe.</p>
       </div>
       <div class="ie-page-header-actions">
         <button class="ie-btn ie-btn-primary" @click="showForm = !showForm">

@@ -53,8 +53,8 @@ async function handleSubmit() {
       <div class="ie-split-hero-inner">
         <div class="ie-split-brand-row">
           <router-link :to="{ name: 'landing' }" class="ie-split-brand">
-            <img :src="logo" alt="InnovEvent" class="ie-split-logo" />
-            <span class="ie-split-brand-word">InnovEvent<span>Group</span></span>
+            <img :src="logo" alt="InnovEvent&amp;Home groupe" class="ie-split-logo" />
+            <span class="ie-split-brand-word">InnovEvent&amp;Home <span>groupe</span></span>
           </router-link>
           <LanguageSwitcher />
         </div>
@@ -89,7 +89,7 @@ async function handleSubmit() {
           </div>
         </div>
 
-        <p class="ie-split-footer">© 2026 InnovEvent Group · Douala · Yaoundé · Bafoussam</p>
+        <p class="ie-split-footer">© 2026 InnovEvent&amp;Home groupe · Douala · Yaoundé · Bafoussam</p>
       </div>
     </aside>
 

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, ref } from "vue";
 
-// Base de connaissances dérivée du document de positionnement InnovEvent Group
+// Base de connaissances dérivée du document de positionnement InnovEvent&amp;Home groupe
 // (historique, vision, mission, valeurs, pôles d'activité...). Correspondance
 // simple par mots-clés — pas d'appel réseau, pas d'authentification requise :
 // ce chatbot doit répondre à tout visiteur anonyme de la page d'accueil.
@@ -9,7 +9,7 @@ const FAQS = [
   {
     id: "presentation",
     chip: "Qui êtes-vous ?",
-    keywords: ["qui etes vous", "qui es tu", "presentation", "c'est quoi innovevent", "innovevent group", "acamed", "vous etes qui"],
+    keywords: ["qui etes vous", "qui es tu", "presentation", "c'est quoi innovevent", "innovevent&home groupe", "acamed", "vous etes qui"],
     answer: "INNOVEVENT, en collaboration avec ACAMED (Académie des Métiers de l'Événementiel et du Design), est une entreprise multiservices qui conçoit, planifie et organise des événements à forte valeur ajoutée pour les entreprises, institutions, associations et particuliers — et forme les talents de demain aux métiers de l'événementiel et du design.",
   },
   {
@@ -37,7 +37,7 @@ const FAQS = [
     id: "poles",
     chip: "Quels sont vos domaines d'activité ?",
     keywords: ["domaine", "pole", "poles", "activites", "services proposes", "que proposez vous", "que faites vous"],
-    answer: "Nous intervenons sur plusieurs pôles complémentaires réunis sous la marque InnovEvent Group : Events (organisation d'événements), Home & Design (décoration et aménagement), Shop (vente d'objets et équipements), Academy (formations), Travel (tourisme) et Stay (hébergement).",
+    answer: "Nous intervenons sur plusieurs pôles complémentaires réunis sous la marque InnovEvent&amp;Home groupe : Events (organisation d'événements), Home & Design (décoration et aménagement), Shop (vente d'objets et équipements), Academy (formations), Travel (tourisme) et Stay (hébergement).",
   },
   {
     id: "evenementiel",

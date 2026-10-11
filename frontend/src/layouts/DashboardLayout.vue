@@ -376,9 +376,9 @@ onBeforeUnmount(() => {
 
     <aside id="dashboard-navigation" class="ie-sidebar" :class="{ open: sidebarOpen }">
       <div class="ie-brand">
-        <img :src="logo" alt="InnovEvent" class="ie-brand-logo" />
+        <img :src="logo" alt="InnovEvent&amp;Home groupe" class="ie-brand-logo" />
         <div>
-          <strong>InnovEvent</strong>
+          <strong>InnovEvent&amp;Home groupe</strong>
           <span>Gestion événementielle</span>
         </div>
       </div>

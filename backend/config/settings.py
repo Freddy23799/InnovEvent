@@ -1,5 +1,5 @@
 """
-Configuration Django pour InnovEvent-GS.
+Configuration Django pour InnovEvent&Home groupe.
 
 Choix documentés :
 - Tous les secrets sont lus depuis les variables d'environnement (jamais en dur),
@@ -226,8 +226,8 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "InnovEvent-GS API",
-    "DESCRIPTION": "API REST de la plateforme de gestion événementielle InnovEvent-GS.",
+    "TITLE": "InnovEvent&Home groupe API",
+    "DESCRIPTION": "API REST de la plateforme de gestion événementielle InnovEvent&Home groupe.",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
@@ -268,10 +268,9 @@ if DEBUG and not EMAIL_HOST_PASSWORD:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # --- Paiements & IA (secrets, jamais exposés au frontend) -------------------
-# Les paiements simulés sont activés par défaut uniquement en développement.
-# Une production sans configuration de passerelle échoue ainsi de façon fermée
-# au lieu de présenter un paiement fictif comme encaissé.
-PAYMENTS_DEMO_MODE = os.environ.get("PAYMENTS_DEMO_MODE", str(DEBUG)) == "True"
+# Toute la plateforme utilise les paiements simulés par défaut, y compris hors
+# DEBUG, pour faciliter les essais. Le retour aux passerelles sera explicite.
+PAYMENTS_DEMO_MODE = os.environ.get("PAYMENTS_DEMO_MODE", "True") == "True"
 # Secret partagé attendu sur chaque webhook entrant (en-tête X-Webhook-Secret) —
 # faute d'un identifiant marchand réel par fournisseur pour l'instant, c'est le
 # seul moyen de s'assurer qu'un appel provient bien du serveur de paiement et

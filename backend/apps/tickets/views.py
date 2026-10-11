@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsAdmin, IsAdminOrOrganizer, IsEmployee
 from apps.audit.utils import log_action
 from apps.notifications.services import notify_user, send_ticket_confirmation_email
-from apps.payments.gateways import PaymentGatewayError, get_gateway
+from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
 from apps.payments.models import Payment
 
 from .models import Ticket, TicketType
@@ -158,7 +158,7 @@ class TicketPurchaseView(APIView):
             user=request.user,
             amount=ticket_type.price * quantity,
             currency=ticket_type.currency,
-            provider=provider,
+            provider=get_effective_provider(provider),
             purpose="ticket_purchase",
         )
 

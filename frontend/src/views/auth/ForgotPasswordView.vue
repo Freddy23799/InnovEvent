@@ -38,15 +38,15 @@ async function handleSubmit() {
       <div class="ie-split-hero-scrim"></div>
       <div class="ie-split-hero-inner">
         <router-link :to="{ name: 'landing' }" class="ie-split-brand">
-          <img :src="logo" alt="InnovEvent" class="ie-split-logo" />
-          <span class="ie-split-brand-word">InnovEvent<span>Group</span></span>
+          <img :src="logo" alt="InnovEvent&amp;Home groupe" class="ie-split-logo" />
+          <span class="ie-split-brand-word">InnovEvent&amp;Home <span>groupe</span></span>
         </router-link>
         <div class="ie-split-hero-body">
           <p class="ie-split-eyebrow">Espace client</p>
           <h1>Récupérez<br />l'accès à votre compte.</h1>
           <p class="ie-split-hero-lede">Indiquez l'adresse email associée à votre compte : nous vous envoyons un lien sécurisé pour choisir un nouveau mot de passe.</p>
         </div>
-        <p class="ie-split-footer">© 2026 InnovEvent Group · Douala · Yaoundé · Bafoussam</p>
+        <p class="ie-split-footer">© 2026 InnovEvent&amp;Home groupe · Douala · Yaoundé · Bafoussam</p>
       </div>
     </aside>
 

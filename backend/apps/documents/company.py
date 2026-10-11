@@ -5,7 +5,7 @@ définitive, etc.)."""
 
 import os
 
-COMPANY_NAME = "InnovEvent-GS"
+COMPANY_NAME = "InnovEvent&Home groupe"
 COMPANY_ADDRESS = "Avenue Kennedy, Yaoundé, Cameroun"
 COMPANY_PHONE = "+237 6XX XXX XXX"
 COMPANY_EMAIL = "contact@innovevent.example"

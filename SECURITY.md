@@ -10,7 +10,7 @@
   l'en-tête `X-Requested-With`; les origines CORS doivent donc rester précises.
 - Les WebSockets vérifient l'origine via `ALLOWED_HOSTS`, refusent les comptes
   inactifs et ne journalisent pas leur query string dans le Nginx fourni.
-- Les paiements simulés sont activés par défaut seulement en mode DEBUG. Les
+- Les paiements simulés sont activés par défaut dans tous les environnements. Les
   webhooks exigent un secret, comparent ce secret en temps constant et verrouillent
   la transaction pour éviter le double traitement simultané.
 - Les pièces jointes de messagerie sont validées, chiffrées au repos et servies
@@ -36,10 +36,10 @@
 4. Définir `MESSAGING_ENCRYPTION_KEY` et `QR_SIGNING_SECRET` comme secrets
    aléatoires distincts, puis les sauvegarder de façon sûre. La clé de messages
    doit rester stable : la changer rend les messages historiques illisibles.
-5. Mettre `PAYMENTS_DEMO_MODE=False` avant toute exposition publique. Les
-   passerelles réelles PayPal, FreemoPay, KOB et carte ne sont pas encore
-   implémentées dans `backend/apps/payments/gateways.py`; tant qu'elles ne le
-   sont pas, aucun paiement réel ne peut être traité de façon fiable. Le secret
+5. Garder `PAYMENTS_DEMO_MODE=True` tant que les passerelles réelles PayPal,
+   FreemoPay, KOB et carte ne sont pas intégrées dans
+   `backend/apps/payments/gateways.py`. Les paiements effectués en mode démo
+   n'entraînent aucun encaissement réel. Le secret
    webhook partagé actuel n'est pas un substitut aux signatures officielles
    des fournisseurs.
 6. Garder PostgreSQL et Redis sur le réseau privé Docker, appliquer les mises à
