@@ -248,18 +248,17 @@ const navSections = computed(() => {
   if (auth.role === "partner") {
     if (hasTalentProfile.value) {
       return [
-        { type: "link", label: "Missions disponibles", to: { name: "talent-missions" }, icon: "fa-solid fa-briefcase" },
+        { type: "link", label: "Mon profil talent", to: { name: "talent-profile" }, icon: "fa-solid fa-star" },
         ...(hasVenueMarketplaceSubscription.value
           ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
           : []),
         { type: "link", label: "Marketplace InnovEvent", to: { name: "premium-marketplace" }, icon: "fa-solid fa-store" },
-        { type: "link", label: "Mon profil talent", to: { name: "talent-profile" }, icon: "fa-solid fa-star" },
         { type: "link", label: "Messagerie", to: { name: "messaging" }, icon: "fa-solid fa-comments", badge: unreadMessages.value },
       ];
     }
     return [
       { type: "link", label: "Dashboard", to: { name: "dashboard" }, icon: "fa-solid fa-gauge-high" },
-      { type: "link", label: "Mes missions", to: { name: "provider-missions" }, icon: "fa-solid fa-briefcase" },
+      { type: "link", label: "Talents", to: { name: "talents-directory" }, icon: "fa-solid fa-users" },
       { type: "link", label: "Demandes de devis reçues", to: { name: "provider-quote-requests" }, icon: "fa-solid fa-file-invoice" },
       { type: "link", label: "Mes disponibilités", to: { name: "provider-availability" }, icon: "fa-solid fa-calendar-check" },
       { type: "link", label: "Mes livraisons", to: { name: "my-deliveries" }, icon: "fa-solid fa-truck-fast" },

@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 
 from reportlab.lib.colors import HexColor
@@ -9,6 +10,8 @@ from apps.documents.company import LOGO_PATH
 
 from .models import Ticket
 from .qr import build_qr_png_bytes, sign_ticket_code
+
+logger = logging.getLogger(__name__)
 
 # --- Palette « billetterie haut de gamme » -----------------------------------
 # Premium : noir profond + doré champagne + blanc cassé (nocturne, prestige).
@@ -48,6 +51,7 @@ def _get_logo():
         try:
             _logo_reader = ImageReader(LOGO_PATH)
         except Exception:
+            logger.warning("Logo PDF illisible (%s) : documents générés sans logo.", LOGO_PATH, exc_info=True)
             _logo_reader = False
     return _logo_reader or None
 

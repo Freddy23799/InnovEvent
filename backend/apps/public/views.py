@@ -53,6 +53,67 @@ def public_landing_media_file(request, path):
     return FileResponse(file_handle, content_type=content_type)
 
 
+# Images de catalogue affichées publiquement (salles, matériel, prestataires,
+# marketplace, talents...). Sans `DEBUG`, Django ne sert plus `/media/` : sans
+# cette route, ces photos répondaient 404 en ligne alors qu'elles
+# s'affichaient en local. Un fichier n'est servi que s'il est référencé en
+# base par l'un de ces champs : un document privé (CNI, permis, CV, pièce
+# jointe...) ou un fichier orphelin déposé dans le même dossier ne l'est jamais.
+PUBLIC_MEDIA_FIELDS = {
+    "venues/": [("venues.Venue", "photo")],
+    "equipment/": [("equipment.Equipment", "photo")],
+    "providers/": [("providers.Provider", "photo")],
+    "trainings/": [("training.Training", "photo")],
+    "avatars/": [("accounts.User", "avatar")],
+    "talents/photos/": [("talents.TalentProfile", "photo")],
+    "talents/portfolio/": [("talents.TalentPortfolioItem", "image")],
+    "marketplace/": [
+        ("marketplace.MarketplaceListing", "photo"),
+        ("marketplace.ProfessionalProfile", "logo"),
+        ("marketplace.ProfessionalProfile", "cover_photo"),
+        ("marketplace.ProfessionalService", "photo"),
+        ("marketplace.ProfessionalPortfolioItem", "image"),
+        ("marketplace.ProfessionalPortfolioItem", "before_image"),
+    ],
+}
+PUBLIC_MEDIA_PREFIXES = tuple(PUBLIC_MEDIA_FIELDS)
+PUBLIC_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+
+def _is_public_media(path):
+    from django.apps import apps
+
+    for prefix, fields in PUBLIC_MEDIA_FIELDS.items():
+        if not path.startswith(prefix):
+            continue
+        for model_label, field_name in fields:
+            if apps.get_model(model_label)._default_manager.filter(**{field_name: path}).exists():
+                return True
+    return False
+
+
+@require_GET
+def public_media_file(request, path):
+    """Sert les images publiques du catalogue quand aucun serveur web ne
+    publie `/media/` (DEBUG désactivé, cPanel/Passenger, Nginx en proxy)."""
+    from django.http import Http404
+
+    content_type = mimetypes.guess_type(path)[0]
+    # Pas de SVG : servi depuis notre domaine, il pourrait exécuter du script.
+    if content_type not in PUBLIC_IMAGE_TYPES or not _is_public_media(path):
+        raise Http404("Média introuvable.")
+    try:
+        file_handle = default_storage.open(path, "rb")
+    except (FileNotFoundError, OSError):
+        raise Http404("Fichier média introuvable.")
+
+    response = FileResponse(file_handle, content_type=content_type)
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    response["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
 def _parse_selections(raw_selections):
     """Normalise la liste `[{pack_item_id, quantity}]` envoyée par le
     frontend — jamais fait confiance aveuglément, mais tolérant aux valeurs

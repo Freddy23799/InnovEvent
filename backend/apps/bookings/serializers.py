@@ -26,6 +26,25 @@ class BookingSerializer(serializers.ModelSerializer):
         resource = obj.resource
         return str(resource) if resource else None
 
+    def _check_status_change(self, attrs):
+        """Seule l'administration confirme une réservation : sinon un client
+        pouvait envoyer `status="confirmed"` et éviter le paiement. Le client
+        peut seulement annuler, et ne modifie plus une réservation confirmée."""
+        request = self.context.get("request")
+        if request is None or request.user.is_admin_role:
+            return
+        requested = attrs.get("status")
+        if self.instance is None:
+            if requested not in (None, Booking.Status.PENDING):
+                raise serializers.ValidationError({"status": "Une nouvelle réservation est toujours en attente."})
+            return
+        if requested == Booking.Status.CANCELLED and set(attrs) == {"status"}:
+            return
+        if requested not in (None, self.instance.status):
+            raise serializers.ValidationError({"status": "Vous pouvez uniquement annuler cette réservation."})
+        if self.instance.status != Booking.Status.PENDING:
+            raise serializers.ValidationError("Seule une réservation en attente peut être modifiée.")
+
     def validate(self, attrs):
         resource_type = attrs.get("resource_type", getattr(self.instance, "resource_type", None))
         venue = attrs.get("venue", getattr(self.instance, "venue", None))
@@ -34,6 +53,8 @@ class BookingSerializer(serializers.ModelSerializer):
         start = attrs.get("start_datetime", getattr(self.instance, "start_datetime", None))
         end = attrs.get("end_datetime", getattr(self.instance, "end_datetime", None))
         quantity = attrs.get("quantity", getattr(self.instance, "quantity", 1))
+
+        self._check_status_change(attrs)
 
         if end and start and end <= start:
             raise serializers.ValidationError({"end_datetime": "La date de fin doit être postérieure à la date de début."})
@@ -46,6 +67,8 @@ class BookingSerializer(serializers.ModelSerializer):
         selected = resource_map.get(resource_type)
         if not selected:
             raise serializers.ValidationError({"resource_type": "La ressource correspondant au type sélectionné est requise."})
+        if not self.instance and not selected.is_active:
+            raise serializers.ValidationError({resource_type: "Cette ressource n'est plus proposée à la réservation."})
         others = [v for k, v in resource_map.items() if k != resource_type and v]
         if others:
             raise serializers.ValidationError("Une seule ressource (salle, prestataire ou matériel) doit être renseignée par réservation.")

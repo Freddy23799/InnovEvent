@@ -1,14 +1,16 @@
+import re
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.defaults import server_error as default_server_error
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.audit.views import HealthCheckView
 from apps.events.views import public_event_photo_file
-from apps.public.views import public_landing_media_file
+from apps.public.views import PUBLIC_MEDIA_PREFIXES, public_landing_media_file, public_media_file
 
 api_v1_patterns = [
     path("auth/", include("apps.accounts.urls")),
@@ -37,10 +39,16 @@ api_v1_patterns = [
 ]
 
 urlpatterns = [
-    # Fallback cPanel/Passenger : voir public_landing_media_file. Les autres
-    # fichiers media restent privés et ne sont jamais exposés par cette route.
+    # Fallback cPanel/Passenger : voir public_landing_media_file et
+    # public_media_file. Les documents privés (CNI, CV, pièces jointes...) ne
+    # sont jamais exposés par ces routes.
     path("media/events/<path:path>", public_event_photo_file, name="public-event-photo-file"),
     path("media/landing/<path:path>", public_landing_media_file, name="public-landing-media-file"),
+    re_path(
+        r"^media/(?P<path>(?:%s).+)$" % "|".join(re.escape(prefix) for prefix in PUBLIC_MEDIA_PREFIXES),
+        public_media_file,
+        name="public-media-file",
+    ),
     path("admin/", admin.site.urls),
     path("health/", HealthCheckView.as_view(), name="healthcheck"),
     path("api/v1/", include(api_v1_patterns)),

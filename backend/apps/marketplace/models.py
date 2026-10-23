@@ -12,7 +12,7 @@ class MarketplaceType(models.TextChoices):
     INTERIOR_DESIGN = "interior_design", "Décoration & design intérieur"
     ACTORS = "actors", "Marketplace des acteurs"
     VENUES = "venues", "Salles de réception"
-    TALENT_MISSIONS = "talent_missions", "Missions pour talents"
+    TALENT_MISSIONS = "talent_missions", "Visibilité talent"
 
 
 class CommissionSettings(models.Model):
@@ -63,7 +63,7 @@ class SubscriptionPlan(models.Model):
     price = models.DecimalField(max_digits=12, decimal_places=2, help_text="Prix total de la formule, en XAF.")
     discount_percent = models.PositiveSmallIntegerField(default=0, help_text="Purement informatif — affiché comme badge de réduction.")
     order = models.PositiveIntegerField(default=0)
-    marketplace_type = models.CharField(max_length=30, choices=MarketplaceType.choices, null=True, blank=True, help_text="Vide = formule commune. Choisissez Missions pour talents pour son tarif dédié.")
+    marketplace_type = models.CharField(max_length=30, choices=MarketplaceType.choices, null=True, blank=True, help_text="Vide = formule commune. Choisissez Visibilité talent pour son tarif dédié.")
 
     class Meta:
         ordering = ["order", "months"]

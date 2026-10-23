@@ -415,17 +415,20 @@ const routes = [
         meta: { roles: ["partner"] },
       },
       {
-        path: "provider-missions",
-        name: "provider-missions",
-        component: () => import("../views/talents/ProviderMissionsManageView.vue"),
+        path: "talents",
+        name: "talents-directory",
+        component: () => import("../views/talents/TalentDirectoryView.vue"),
         meta: { roles: ["partner"], providerOnly: true },
       },
       {
-        path: "talent-missions",
-        name: "talent-missions",
-        component: () => import("../views/talents/TalentMissionsView.vue"),
-        meta: { roles: ["partner"], talentOnly: true },
+        path: "talents/:id(\\d+)",
+        name: "talent-detail",
+        component: () => import("../views/talents/TalentDetailView.vue"),
+        meta: { roles: ["partner"], providerOnly: true },
       },
+      // Anciennes pages « missions » (supprimées) : liens et favoris redirigés.
+      { path: "provider-missions", redirect: { name: "talents-directory" } },
+      { path: "talent-missions", redirect: { name: "talent-profile" } },
       {
         path: "talent-profile",
         name: "talent-profile",
@@ -607,7 +610,7 @@ router.beforeEach(async (to) => {
       await api.get("/talents/me/");
       return { name: "dashboard" };
     } catch {
-      // Un compte partenaire sans profil talent peut gérer ses offres.
+      // Un compte partenaire sans profil talent (prestataire) consulte les talents.
     }
   }
   return true;

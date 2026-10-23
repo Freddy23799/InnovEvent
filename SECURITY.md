@@ -14,8 +14,17 @@
   webhooks exigent un secret, comparent ce secret en temps constant et verrouillent
   la transaction pour éviter le double traitement simultané.
 - Les pièces jointes de messagerie sont validées, chiffrées au repos et servies
-  avec un jeton signé de durée limitée. Les fichiers media autres que la
-  photothèque publique ne sont pas exposés par les URL Django de production.
+  avec un jeton signé de durée limitée. En production, Django ne sert que les
+  images de catalogue (salles, matériel, prestataires, marketplace, talents,
+  avatars) **référencées en base** par un champ public (JPEG/PNG/GIF/WebP, pas
+  de SVG, en-têtes `nosniff` + CSP `sandbox`). Les justificatifs (CNI, permis,
+  CV, documents d'entreprise, preuves de livraison) ne sont jamais exposés.
+- Le statut d'une réservation n'est confirmé que par le paiement ou par
+  l'administration ; un client peut seulement annuler. Un transporteur ne peut
+  ni lever une suspension (la sienne ou celle d'un chauffeur), ni transférer sa
+  fiche à un autre compte, ni affecter un véhicule d'une autre flotte.
+- Les profils talents ne sont visibles que des prestataires connectés, et
+  uniquement pendant l'abonnement « Visibilité talent » du talent.
 - Le conteneur backend n'expose plus directement son port sur l'hôte ; il reste
   accessible sur le réseau interne Docker par le reverse proxy.
 

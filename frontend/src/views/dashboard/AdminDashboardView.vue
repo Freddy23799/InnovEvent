@@ -178,7 +178,7 @@ onMounted(loadDashboard);
           <div><span class="activity-icon"><i class="fa-solid fa-bookmark"></i></span><strong>{{ numberFormat.format(data?.activity.bookings || 0) }}</strong><small>Réservations</small></div>
           <div><span class="activity-icon"><i class="fa-solid fa-store"></i></span><strong>{{ numberFormat.format(data?.activity.marketplace_listings || 0) }}</strong><small>Annonces actives</small></div>
           <div><span class="activity-icon"><i class="fa-solid fa-clipboard-list"></i></span><strong>{{ numberFormat.format(data?.activity.open_booking_requests || 0) }}</strong><small>Demandes à traiter</small></div>
-          <div><span class="activity-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span><strong>{{ numberFormat.format(data?.activity.active_missions || 0) }}</strong><small>Missions talent</small></div>
+          <div><span class="activity-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span><strong>{{ numberFormat.format(data?.activity.visible_talents || 0) }}</strong><small>Talents visibles</small></div>
           <div><span class="activity-icon"><i class="fa-solid fa-graduation-cap"></i></span><strong>{{ numberFormat.format(data?.activity.training_enrollments || 0) }}</strong><small>Inscriptions formation</small></div>
           <div><span class="activity-icon"><i class="fa-solid fa-circle-check"></i></span><strong>{{ numberFormat.format(data?.activity.confirmed_bookings || 0) }}</strong><small>Réservations confirmées</small></div>
         </div>

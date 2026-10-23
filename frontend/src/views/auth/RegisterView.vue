@@ -179,7 +179,7 @@ async function handleSubmit() {
     await auth.login(form.username, form.password);
     // Préserve le contexte (ex : « Demander un devis pour ce pack ») au lieu
     // de toujours renvoyer vers un tableau de bord générique après inscription.
-    router.push(route.query.next || (form.profile === "talent" ? { name: "talent-missions" } : { name: "dashboard" }));
+    router.push(route.query.next || (form.profile === "talent" ? { name: "talent-profile" } : { name: "dashboard" }));
   } catch (e) {
     const payload = e?.response?.data || {};
     errors.value = {

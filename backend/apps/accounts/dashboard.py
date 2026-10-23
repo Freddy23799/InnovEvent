@@ -13,7 +13,8 @@ from apps.bookings.models import Booking
 from apps.events.models import Event
 from apps.marketplace.models import MarketplaceListing, MarketplaceSubscription, ProfessionalBookingRequest
 from apps.payments.models import Payment
-from apps.talents.models import TalentMission, TalentProfile
+from apps.talents.models import TalentProfile
+from apps.talents.views import visible_talent_profiles
 from apps.tickets.models import Ticket
 from apps.training.models import Enrollment
 
@@ -104,7 +105,7 @@ class AdminDashboardView(APIView):
                 "booking_requests": ProfessionalBookingRequest.objects.count(),
                 "open_booking_requests": ProfessionalBookingRequest.objects.exclude(status__in=["confirmed", "completed", "declined", "cancelled"]).count(),
                 "talents": TalentProfile.objects.count(),
-                "active_missions": TalentMission.objects.filter(is_active=True).count(),
+                "visible_talents": visible_talent_profiles(TalentProfile.objects.all()).count(),
                 "active_subscriptions": active_subscriptions.count(),
             },
         })

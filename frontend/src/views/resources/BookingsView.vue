@@ -39,6 +39,30 @@ const emptyForm = {
 };
 const form = reactive({ ...emptyForm });
 
+// Ressource choisie depuis un catalogue (« Réserver cette salle »…) : elle est
+// verrouillée et affichée en récapitulatif, le client n'a plus à la
+// re-sélectionner dans une liste (paginée, donc parfois incomplète).
+const RESOURCE_ENDPOINTS = { venue: "/venues/", provider: "/providers/", equipment: "/equipment/" };
+const LOCKED_RESOURCE_LABELS = { venue: "Salle sélectionnée", provider: "Prestataire sélectionné", equipment: "Matériel sélectionné" };
+const LOCKED_RESOURCE_ICONS = { venue: "fa-building-columns", provider: "fa-user-tie", equipment: "fa-box-open" };
+const lockedResource = ref(null);
+
+const lockedResourceDetails = computed(() => {
+  const item = lockedResource.value;
+  if (!item) return [];
+  if (form.resource_type === "venue") {
+    return [
+      item.city && `${item.address ? item.address + ", " : ""}${item.city}`,
+      item.capacity && `${item.capacity} personnes`,
+      item.price_per_day && `${Number(item.discounted_price_per_day || item.price_per_day).toLocaleString("fr-FR")} XAF / jour`,
+    ].filter(Boolean);
+  }
+  if (form.resource_type === "equipment") {
+    return [item.category, item.price_per_unit && `${Number(item.discounted_price_per_unit || item.price_per_unit).toLocaleString("fr-FR")} XAF / unité`].filter(Boolean);
+  }
+  return [item.category, item.city, item.price_range].filter(Boolean);
+});
+
 const resourceOptions = computed(() => {
   if (form.resource_type === "venue") return venues.value;
   if (form.resource_type === "provider") return providers.value;
@@ -68,7 +92,23 @@ async function loadAll() {
 
 function resetForm() {
   Object.assign(form, emptyForm);
+  lockedResource.value = null;
   errorMessage.value = "";
+}
+
+async function lockResource(resourceType, resourceId) {
+  const endpoint = RESOURCE_ENDPOINTS[resourceType];
+  if (!endpoint) return;
+  const id = Number(resourceId);
+  const fromList = { venue: venues, provider: providers, equipment: equipment }[resourceType].value.find((r) => r.id === id);
+  try {
+    lockedResource.value = fromList || (await api.get(`${endpoint}${id}/`)).data;
+  } catch (e) {
+    toast.error(e?.response?.data?.detail || "Cette ressource n'est pas disponible à la réservation.");
+    return;
+  }
+  Object.assign(form, emptyForm, { resource_type: resourceType, [resourceType]: id });
+  showForm.value = true;
 }
 
 async function submitForm() {
@@ -164,13 +204,9 @@ onMounted(async () => {
   await loadAll();
   const { resource_type, resource_id, quantity } = route.query;
   if (resource_type && resource_id) {
-    Object.assign(form, emptyForm, {
-      resource_type,
-      [resource_type]: Number(resource_id),
-      quantity: quantity ? Number(quantity) : 1,
-    });
-    showForm.value = true;
     router.replace({ query: {} });
+    await lockResource(resource_type, resource_id);
+    form.quantity = quantity ? Number(quantity) : 1;
   }
 });
 </script>
@@ -199,7 +235,7 @@ onMounted(async () => {
               <option v-for="ev in events" :key="ev.id" :value="ev.id">{{ ev.title }}</option>
             </select>
           </div>
-          <div>
+          <div v-if="!lockedResource">
             <label class="ie-label">Type de ressource</label>
             <select v-model="form.resource_type" class="ie-select">
               <option value="venue">Salle</option>
@@ -209,11 +245,22 @@ onMounted(async () => {
           </div>
         </div>
 
-        <label class="ie-label" style="margin-top: 14px;">Ressource</label>
-        <select v-model="form[form.resource_type]" class="ie-select" required>
-          <option value="" disabled>Choisir…</option>
-          <option v-for="res in resourceOptions" :key="res.id" :value="res.id">{{ res.name }}</option>
-        </select>
+        <div v-if="lockedResource" class="ie-booking-locked">
+          <img v-if="lockedResource.photo" :src="lockedResource.photo" :alt="lockedResource.name" class="ie-booking-locked-photo" />
+          <div v-else class="ie-booking-locked-photo ie-booking-locked-placeholder"><i class="fa-solid" :class="LOCKED_RESOURCE_ICONS[form.resource_type]"></i></div>
+          <div>
+            <span class="ie-booking-locked-type">{{ LOCKED_RESOURCE_LABELS[form.resource_type] }}</span>
+            <strong class="ie-booking-locked-name">{{ lockedResource.name }}</strong>
+            <span v-for="detail in lockedResourceDetails" :key="detail" class="ie-booking-locked-detail">{{ detail }}</span>
+          </div>
+        </div>
+        <template v-else>
+          <label class="ie-label" style="margin-top: 14px;">Ressource</label>
+          <select v-model="form[form.resource_type]" class="ie-select" required>
+            <option value="" disabled>Choisir…</option>
+            <option v-for="res in resourceOptions" :key="res.id" :value="res.id">{{ res.name }}</option>
+          </select>
+        </template>
 
         <div v-if="form.resource_type === 'equipment'" style="margin-top: 14px;">
           <label class="ie-label">Quantité</label>
@@ -312,3 +359,12 @@ onMounted(async () => {
     />
   </div>
 </template>
+
+<style scoped>
+.ie-booking-locked { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 12px; border: 1px solid var(--ie-border, #e3e6ea); border-radius: 12px; background: #fafbfc; }
+.ie-booking-locked-photo { width: 88px; height: 66px; flex: 0 0 88px; border-radius: 8px; object-fit: cover; }
+.ie-booking-locked-placeholder { display: grid; place-items: center; background: #eef0f2; color: #9aa3ac; font-size: 22px; }
+.ie-booking-locked-type { display: block; color: var(--ie-muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.ie-booking-locked-name { display: block; margin: 2px 0 4px; color: var(--ie-ink); font-size: 15px; }
+.ie-booking-locked-detail { display: inline-block; margin-right: 12px; color: #3c4b5b; font-size: 12px; }
+</style>

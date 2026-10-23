@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
+import SubscriptionCheckoutModal from "../../components/SubscriptionCheckoutModal.vue";
 import api from "../../services/api";
 import { useToastStore } from "../../stores/toast";
 
@@ -28,6 +29,42 @@ const form = reactive({
 });
 const verificationStatus = ref("not_verified");
 
+// Visibilité côté prestataires : le profil n'apparaît dans leur annuaire
+// qu'une fois complet et l'abonnement « Visibilité talent » payé.
+const missingFields = ref([]);
+const visibleUntil = ref(null);
+const plans = ref([]);
+const tiers = ref([]);
+const demoMode = ref(false);
+const checkoutOpen = ref(false);
+
+async function loadPlans() {
+  const { data } = await api.get("/marketplace/subscriptions/", { params: { marketplace_type: "talent_missions" } });
+  plans.value = data.plans || [];
+  tiers.value = data.tiers || [];
+  demoMode.value = Boolean(data.demo_mode);
+}
+
+async function refreshVisibility() {
+  const { data } = await api.get("/talents/me/");
+  missingFields.value = data.missing_fields || [];
+  visibleUntil.value = data.visible_until;
+}
+
+function openCheckout() {
+  if (!plans.value.length) {
+    toast.error("Aucune formule de visibilité n'est configurée. Contactez l'administration.");
+    return;
+  }
+  checkoutOpen.value = true;
+}
+
+async function onSubscribed() {
+  checkoutOpen.value = false;
+  await refreshVisibility();
+  toast.success("Votre profil est maintenant visible par les prestataires.");
+}
+
 async function loadData() {
   loading.value = true;
   notFound.value = false;
@@ -41,6 +78,9 @@ async function loadData() {
     currentPhoto.value = data.photo;
     verificationStatus.value = data.verification_status;
     portfolioItems.value = data.portfolio_items;
+    missingFields.value = data.missing_fields || [];
+    visibleUntil.value = data.visible_until;
+    await loadPlans();
   } catch (e) {
     if (e?.response?.status === 404) notFound.value = true;
   } finally {
@@ -58,6 +98,7 @@ async function submitForm() {
     const { data } = await api.patch(`/talents/${talentId.value}/`, payload);
     currentPhoto.value = data.photo;
     photoFile.value = null;
+    missingFields.value = data.missing_fields || [];
     toast.success("Profil talent mis à jour.");
   } catch (e) {
     errorMessage.value = e?.response?.data?.detail || "Impossible d'enregistrer ces modifications.";
@@ -79,6 +120,7 @@ async function addPortfolioItem() {
     portfolioFile.value = null;
     portfolioCaption.value = "";
     toast.success("Élément de portfolio ajouté.");
+    await refreshVisibility();
   } finally {
     uploadingPortfolio.value = false;
   }
@@ -87,6 +129,7 @@ async function addPortfolioItem() {
 async function removePortfolioItem(item) {
   await api.delete(`/talents/portfolio/${item.id}/`);
   portfolioItems.value = portfolioItems.value.filter((i) => i.id !== item.id);
+  await refreshVisibility();
 }
 
 onMounted(loadData);
@@ -95,7 +138,7 @@ onMounted(loadData);
 <template>
   <div>
     <h1><i class="fa-solid fa-star" style="color: var(--ie-red); margin-right: 8px;"></i>Mon profil talent</h1>
-    <p class="ie-page-subtitle">Vos informations, visibles dans l'annuaire public « Talents » de la page d'accueil.</p>
+    <p class="ie-page-subtitle">Complétez votre profil et vos réalisations, puis rendez-le visible auprès des prestataires.</p>
 
     <div v-if="loading" class="ie-card ie-card-body" style="margin-top: 16px;">Chargement…</div>
     <EmptyState
@@ -107,6 +150,33 @@ onMounted(loadData);
       <p class="ie-alert" style="margin-top: 16px;" :class="verificationStatus === 'not_verified' ? 'ie-alert-warning' : 'ie-alert-success'">
         <i class="fa-solid fa-shield-halved"></i> Statut de vérification : <strong>{{ VERIFICATION_LABELS[verificationStatus] }}</strong>
       </p>
+
+      <div class="ie-card ie-card-body ie-visibility" style="margin-top: 16px;">
+        <div class="ie-visibility-icon" :class="{ on: visibleUntil }"><i class="fa-solid" :class="visibleUntil ? 'fa-eye' : 'fa-eye-slash'"></i></div>
+        <div class="ie-visibility-text">
+          <template v-if="visibleUntil">
+            <strong>Votre profil est visible par les prestataires</strong>
+            <span>Jusqu'au {{ new Date(visibleUntil).toLocaleDateString("fr-FR") }}. Ils peuvent consulter vos réalisations et vous contacter.</span>
+          </template>
+          <template v-else-if="missingFields.length">
+            <strong>Complétez votre profil pour le rendre visible</strong>
+            <span>Il manque : {{ missingFields.join(", ") }}.</span>
+          </template>
+          <template v-else>
+            <strong>Votre profil est prêt</strong>
+            <span>Abonnez-vous pour apparaître dans l'annuaire des prestataires.</span>
+          </template>
+        </div>
+        <button
+          v-if="!visibleUntil || missingFields.length === 0"
+          class="ie-btn ie-btn-primary"
+          :disabled="missingFields.length > 0"
+          @click="openCheckout"
+        >
+          <i class="fa-solid fa-bullhorn"></i>
+          {{ visibleUntil ? "Prolonger" : plans[0] ? `Rendre visible · ${Number(plans[0].price).toLocaleString("fr-FR")} FCFA` : "Rendre visible" }}
+        </button>
+      </div>
 
       <div class="ie-card ie-card-body" style="margin-top: 16px;">
         <form @submit.prevent="submitForm">
@@ -159,7 +229,7 @@ onMounted(loadData);
       </div>
 
       <div class="ie-card ie-card-body" style="margin-top: 16px;">
-        <h3 class="ie-doc-section-title">Portfolio</h3>
+        <h3 class="ie-doc-section-title">Mes réalisations</h3>
         <div class="ie-portfolio-grid">
           <div v-for="item in portfolioItems" :key="item.id" class="ie-portfolio-item">
             <img :src="item.image" :alt="item.caption" />
@@ -181,10 +251,28 @@ onMounted(loadData);
         </button>
       </div>
     </template>
+
+    <SubscriptionCheckoutModal
+      v-if="checkoutOpen"
+      marketplace-type="talent_missions"
+      marketplace-label="Visibilité talent"
+      :plans="plans"
+      :tiers="tiers"
+      :demo-mode="demoMode"
+      @close="checkoutOpen = false"
+      @subscribed="onSubscribed"
+    />
   </div>
 </template>
 
 <style scoped>
+.ie-visibility { display: flex; align-items: center; gap: 14px; }
+.ie-visibility-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px; background: #fff0f0; color: #b13238; }
+.ie-visibility-icon.on { background: #e9f6ef; color: #28734f; }
+.ie-visibility-text { flex: 1; min-width: 0; }
+.ie-visibility-text strong { display: block; color: var(--ie-ink); font-size: 14px; }
+.ie-visibility-text span { color: var(--ie-muted); font-size: 12px; }
+@media (max-width: 640px) { .ie-visibility { flex-wrap: wrap; } .ie-visibility .ie-btn { width: 100%; justify-content: center; } }
 .ie-doc-section-title { font-size: 13px; color: var(--ie-navy); margin: 0 0 12px; font-weight: 700; }
 .ie-doc-thumb { width: 90px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--ie-border); margin-top: 8px; }
 .ie-portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }

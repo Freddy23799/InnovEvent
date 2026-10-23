@@ -28,7 +28,7 @@ const editingPlanId = ref(null);
 
 const emptyPlanForm = { code: "", label: "", months: 1, duration_days: 30, price: 0, discount_percent: 0, order: 0, marketplace_type: null };
 const marketplaceLabels = {
-  talent_missions: "Missions pour talents",
+  talent_missions: "Visibilité talent",
   sale: "Marketplace vente",
   actors: "Marketplace des acteurs",
   interior_design: "Décoration & design intérieur",
@@ -246,7 +246,7 @@ onMounted(() => {
         <label class="ie-label" style="margin-top: 14px;">Marketplace concernée</label>
         <select v-model="planForm.marketplace_type" class="ie-select">
           <option :value="null">Tous les marketplaces (formule commune)</option>
-          <option value="talent_missions">Missions pour talents</option>
+          <option value="talent_missions">Visibilité talent</option>
           <option value="sale">Marketplace vente</option><option value="actors">Marketplace des acteurs</option>
           <option value="interior_design">Décoration & design intérieur</option><option value="venues">Salles de réception</option>
         </select>

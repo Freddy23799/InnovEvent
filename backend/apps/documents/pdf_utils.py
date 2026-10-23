@@ -1,3 +1,4 @@
+import logging
 import io
 
 from reportlab.lib.colors import HexColor
@@ -7,6 +8,8 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from .company import COMPANY_EMAIL, COMPANY_NAME, COMPANY_PHONE, COMPANY_WEBSITE, LOGO_PATH
+
+logger = logging.getLogger(__name__)
 
 INNOVEVENT_RED = HexColor("#C0272D")
 INNOVEVENT_NAVY = HexColor("#39495B")
@@ -21,6 +24,7 @@ def _get_logo():
         try:
             _logo_reader = ImageReader(LOGO_PATH)
         except Exception:
+            logger.warning("Logo PDF illisible (%s) : documents générés sans logo.", LOGO_PATH, exc_info=True)
             _logo_reader = False
     return _logo_reader or None
 

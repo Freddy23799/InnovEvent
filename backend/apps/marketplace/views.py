@@ -327,8 +327,14 @@ class MarketplaceSubscriptionView(APIView):
         marketplace_type = serializer.validated_data["marketplace_type"]
         if marketplace_type == MarketplaceType.TALENT_MISSIONS:
             from apps.talents.models import TalentProfile
-            if not TalentProfile.objects.filter(user=request.user, is_active=True).exists():
+            talent_profile = TalentProfile.objects.filter(user=request.user, is_active=True).first()
+            if not talent_profile:
                 return Response({"detail": "Un profil talent actif est requis pour cet abonnement."}, status=status.HTTP_403_FORBIDDEN)
+            if talent_profile.missing_fields:
+                return Response(
+                    {"detail": "Complétez votre profil avant de le rendre visible : " + ", ".join(talent_profile.missing_fields) + "."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         scoped_plans = SubscriptionPlan.objects.filter(marketplace_type=marketplace_type)
         plan_qs = scoped_plans if scoped_plans.exists() else SubscriptionPlan.objects.filter(marketplace_type__isnull=True)
         plan = plan_qs.filter(code=serializer.validated_data["plan"]).first()

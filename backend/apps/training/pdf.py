@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 
 from reportlab.lib.colors import HexColor
@@ -9,6 +10,8 @@ from reportlab.pdfgen import canvas as pdf_canvas
 from apps.documents.pdf_utils import _get_logo, draw_footer, draw_header, draw_qr_image
 from apps.documents.qr_utils import build_qr_png_bytes
 from apps.documents.signing import sign_payload
+
+logger = logging.getLogger(__name__)
 
 
 def build_certificate_pdf(certificate) -> bytes:
@@ -98,6 +101,7 @@ def build_badge_pdf(badge) -> bytes:
         try:
             pdf.drawImage(ImageReader(photo_field.path), photo_x, photo_y, width=photo_w, height=photo_h, mask="auto")
         except Exception:
+            logger.warning("Photo de badge illisible pour le badge #%s.", badge.pk, exc_info=True)
             photo_field = None
     if not photo_field:
         pdf.setFillColor(HexColor("#eef0f2"))

@@ -1,3 +1,4 @@
+import logging
 from email.mime.image import MIMEImage
 
 from django.conf import settings
@@ -8,6 +9,8 @@ from apps.documents.company import LOGO_PATH
 
 from .models import EmailLog, Notification, SmsLog
 from .sms import SmsProviderError, get_sms_provider
+
+logger = logging.getLogger(__name__)
 
 _logo_bytes = None
 
@@ -141,7 +144,7 @@ def _push_realtime(notification):
             },
         )
     except Exception:
-        pass
+        logger.warning("Notification #%s non poussée en temps réel.", notification.id, exc_info=True)
 
 
 def notify_user(user, title, message="", link="", send_email_too=False, send_sms_too=False):

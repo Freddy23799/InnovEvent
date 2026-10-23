@@ -1,35 +1,50 @@
-from django.db.models import Q
-from rest_framework import permissions, status, viewsets
+from django.db.models import Exists, OuterRef
+from django.utils import timezone
+from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from apps.messaging.models import Conversation
-from apps.messaging.serializers import ConversationSerializer
 
 from apps.accounts.permissions import IsAdmin
 from apps.audit.utils import log_action
-
 from apps.marketplace.models import MarketplaceSubscription, MarketplaceType
-from django.utils import timezone
+from apps.messaging.models import Conversation
+from apps.messaging.serializers import ConversationSerializer
 
-from .models import TalentMission, TalentPortfolioItem, TalentProfile
-from .serializers import TalentMissionManageSerializer, TalentMissionSerializer, TalentPortfolioItemSerializer, TalentProfileSerializer, TalentVerificationSerializer
+from .models import TalentPortfolioItem, TalentProfile
+from .serializers import TalentPortfolioItemSerializer, TalentProfileSerializer, TalentVerificationSerializer
+
+
+def visible_talent_profiles(queryset):
+    """Profils affichés aux prestataires : actifs et dont l'abonnement
+    « Visibilité talent » est en cours. Le talent paie pour être vu ; le
+    prestataire consulte gratuitement."""
+    active_subscription = MarketplaceSubscription.objects.filter(
+        user=OuterRef("user"), marketplace_type=MarketplaceType.TALENT_MISSIONS, expires_at__gt=timezone.now(),
+    )
+    return queryset.filter(is_active=True).filter(Exists(active_subscription))
+
+
+def can_browse_talents(user):
+    """Administration et comptes prestataire (partenaire sans profil talent)."""
+    if user.is_admin_role:
+        return True
+    return user.role == "partner" and not TalentProfile.objects.filter(user=user).exists()
 
 
 class TalentProfileViewSet(viewsets.ModelViewSet):
-    """Profil « Talent » (section 5/6/7 du CDC) : consultable publiquement
-    (annuaire des talents sur la page d'accueil), géré par son titulaire,
-    vérifié uniquement par l'administration."""
+    """Profil « Talent » (section 5/6/7 du CDC) : géré par son titulaire,
+    consultable par les prestataires tant que l'abonnement du talent est
+    actif, vérifié uniquement par l'administration."""
 
     serializer_class = TalentProfileSerializer
-    filterset_fields = ["verification_status", "is_active", "opportunity_type", "city"]
-    search_fields = ["full_name", "competences", "city"]
+    filterset_fields = {
+        "verification_status": ["exact"], "is_active": ["exact"], "opportunity_type": ["exact"],
+        "disponibilite": ["exact"], "city": ["icontains"],
+    }
+    search_fields = ["full_name", "competences", "city", "formation"]
 
     def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
-            return [permissions.AllowAny()]
         if self.action == "verify":
             return [permissions.IsAuthenticated(), IsAdmin()]
         return [permissions.IsAuthenticated()]
@@ -37,15 +52,10 @@ class TalentProfileViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = TalentProfile.objects.select_related("user").prefetch_related("portfolio_items")
         user = self.request.user
-        if user.is_authenticated and user.is_admin_role:
+        if user.is_admin_role:
             return qs
-        if self.action in ["list", "retrieve"]:
-            # Annuaire public (section 7 — rubrique « Talents » de la page
-            # d'accueil) : seuls les profils actifs sont visibles, sauf pour
-            # le titulaire lui-même qui doit voir/gérer le sien même inactif.
-            if user.is_authenticated:
-                return qs.filter(Q(is_active=True) | Q(user=user))
-            return qs.filter(is_active=True)
+        if self.action in ["list", "retrieve", "contact"] and can_browse_talents(user):
+            return visible_talent_profiles(qs)
         return qs.filter(user=user)
 
     def perform_create(self, serializer):
@@ -72,23 +82,31 @@ class TalentProfileViewSet(viewsets.ModelViewSet):
         )
         return Response(TalentProfileSerializer(profile).data)
 
+    @action(detail=True, methods=["post"])
+    def contact(self, request, pk=None):
+        """Ouvre (ou retrouve) la conversation entre le prestataire et le talent."""
+        if not can_browse_talents(request.user):
+            raise PermissionDenied("Seuls les comptes prestataire peuvent contacter un talent.")
+        profile = self.get_object()
+        if profile.user_id == request.user.id or not profile.user.is_active:
+            raise PermissionDenied("Ce talent n'est pas joignable.")
+        conversation = Conversation.get_or_create_between(request.user, profile.user)
+        log_action(actor=request.user, action="talent.contacted", metadata={"talent": profile.id})
+        return Response(ConversationSerializer(conversation, context={"request": request}).data)
+
 
 class TalentPortfolioItemViewSet(viewsets.ModelViewSet):
     serializer_class = TalentPortfolioItemSerializer
     filterset_fields = ["profile"]
-
-    def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
-            return [permissions.AllowAny()]
-        return [permissions.IsAuthenticated()]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         qs = TalentPortfolioItem.objects.select_related("profile")
         user = self.request.user
-        if self.action in ["list", "retrieve"]:
-            return qs.filter(profile__is_active=True)
-        if user.is_authenticated and user.is_admin_role:
+        if user.is_admin_role:
             return qs
+        if self.action in ["list", "retrieve"] and can_browse_talents(user):
+            return qs.filter(profile__in=visible_talent_profiles(TalentProfile.objects.all()))
         return qs.filter(profile__user=user)
 
     def perform_create(self, serializer):
@@ -96,60 +114,3 @@ class TalentPortfolioItemViewSet(viewsets.ModelViewSet):
         if not profile:
             raise PermissionDenied("Vous devez d'abord créer votre profil talent.")
         serializer.save(profile=profile)
-
-
-class TalentMissionListView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request):
-        if not TalentProfile.objects.filter(user=request.user, is_active=True).exists():
-            return Response({"detail": "Cette rubrique est réservée aux comptes talent."}, status=status.HTTP_403_FORBIDDEN)
-        subscription = MarketplaceSubscription.objects.filter(
-            user=request.user, marketplace_type=MarketplaceType.TALENT_MISSIONS, expires_at__gt=timezone.now(),
-        ).first()
-        if not subscription:
-            return Response({"detail": "Un abonnement actif est nécessaire pour consulter les missions."}, status=status.HTTP_402_PAYMENT_REQUIRED)
-        missions = TalentMission.objects.filter(is_active=True)
-        return Response(TalentMissionSerializer(missions, many=True).data)
-
-
-class TalentMissionContactView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request, mission_id):
-        if not TalentProfile.objects.filter(user=request.user, is_active=True).exists():
-            return Response({"detail": "Cette rubrique est réservée aux comptes talent."}, status=status.HTTP_403_FORBIDDEN)
-        if not MarketplaceSubscription.objects.filter(
-            user=request.user, marketplace_type=MarketplaceType.TALENT_MISSIONS, expires_at__gt=timezone.now(),
-        ).exists():
-            return Response({"detail": "Un abonnement actif est nécessaire pour contacter le prestataire."}, status=status.HTTP_402_PAYMENT_REQUIRED)
-        mission = TalentMission.objects.filter(pk=mission_id, is_active=True).select_related("provider_user").first()
-        if not mission or not mission.provider_user or not mission.provider_user.is_active:
-            return Response({"detail": "Le prestataire de cette mission n'est pas joignable."}, status=status.HTTP_404_NOT_FOUND)
-        if mission.provider_user_id == request.user.id:
-            return Response({"detail": "Vous ne pouvez pas vous contacter vous-même."}, status=status.HTTP_400_BAD_REQUEST)
-        conversation = Conversation.get_or_create_between(request.user, mission.provider_user)
-        return Response(ConversationSerializer(conversation, context={"request": request}).data)
-
-
-class TalentMissionManageViewSet(viewsets.ModelViewSet):
-    serializer_class = TalentMissionManageSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
-
-    def get_queryset(self):
-        qs = TalentMission.objects.select_related("provider_user")
-        if self.request.user.is_admin_role:
-            return qs
-        return qs.filter(provider_user=self.request.user)
-
-    def perform_create(self, serializer):
-        user = self.request.user
-        if user.role != "partner":
-            raise PermissionDenied("Seuls les comptes prestataire peuvent publier une mission.")
-        try:
-            from apps.marketplace.models import ProfessionalProfile
-            provider_name = ProfessionalProfile.objects.get(user=user).business_name
-        except Exception:
-            provider_name = user.get_full_name() or user.username
-        serializer.save(provider_user=user, provider_name=provider_name, is_demo=False)

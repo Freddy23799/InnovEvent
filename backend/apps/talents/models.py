@@ -54,6 +54,19 @@ class TalentProfile(models.Model):
     def __str__(self):
         return self.full_name
 
+    REQUIRED_FOR_VISIBILITY = {
+        "full_name": "nom complet", "city": "ville", "formation": "formation",
+        "competences": "compétences", "experience": "expérience", "photo": "photo",
+    }
+
+    @property
+    def missing_fields(self):
+        """Champs à compléter avant de pouvoir payer la visibilité du profil."""
+        missing = [label for field, label in self.REQUIRED_FOR_VISIBILITY.items() if not getattr(self, field)]
+        if not self.portfolio_items.exists():
+            missing.append("au moins une réalisation")
+        return missing
+
     @property
     def is_verified(self):
         return self.verification_status != self.VerificationStatus.NOT_VERIFIED
@@ -70,32 +83,3 @@ class TalentPortfolioItem(models.Model):
 
     def __str__(self):
         return self.caption or f"Portfolio #{self.pk}"
-
-
-class TalentMission(models.Model):
-    """Mission fictive ou réelle publiée par un prestataire pour les talents."""
-    class MissionType(models.TextChoices):
-        ONE_OFF = "one_off", "Mission ponctuelle"
-        FIXED_TERM = "fixed_term", "CDD"
-        PERMANENT = "permanent", "CDI"
-        INTERNSHIP = "internship", "Stage"
-        FREELANCE = "freelance", "Freelance"
-
-    title = models.CharField(max_length=180)
-    provider_name = models.CharField(max_length=160)
-    provider_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="talent_missions")
-    city = models.CharField(max_length=100, blank=True)
-    description = models.TextField()
-    mission_type = models.CharField(max_length=20, choices=MissionType.choices, default=MissionType.ONE_OFF)
-    starts_at = models.DateField(null=True, blank=True)
-    compensation = models.CharField(max_length=100, blank=True)
-    skills = models.CharField(max_length=300, blank=True, help_text="Compétences séparées par des virgules")
-    is_active = models.BooleanField(default=True)
-    is_demo = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-
-    def __str__(self):
-        return f"{self.title} — {self.provider_name}"

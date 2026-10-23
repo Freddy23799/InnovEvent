@@ -95,6 +95,20 @@ class CarrierViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Aucun profil transporteur pour ce compte."}, status=status.HTTP_404_NOT_FOUND)
         return Response(CarrierSerializer(carrier).data)
 
+    def perform_update(self, serializer):
+        if self.request.user.is_admin_role:
+            serializer.save()
+            return
+        # Le transporteur met à jour ses coordonnées, mais ne peut ni lever
+        # une suspension, ni se réactiver, ni transférer sa fiche à un autre
+        # compte utilisateur : ces décisions restent à l'administration.
+        instance = serializer.instance
+        requested_status = serializer.validated_data.get("status", instance.status)
+        locked = {Carrier.Status.SUSPENDED, Carrier.Status.INACTIVE}
+        if requested_status != instance.status and (instance.status in locked or requested_status in locked):
+            raise PermissionDenied("Ce statut ne peut être modifié que par l'administration.")
+        serializer.save(user=instance.user, is_active=instance.is_active)
+
     @action(detail=False, methods=["post"], url_path="admin-create")
     def admin_create(self, request):
         """Crée un compte transporteur — même pattern que
@@ -244,6 +258,9 @@ class DriverViewSet(viewsets.ModelViewSet):
         carrier_profile = getattr(user, "carrier_profile", None)
         if not carrier_profile:
             raise PermissionDenied("Vous ne gérez pas d'équipe de chauffeurs.")
+        vehicle = serializer.validated_data.get("current_vehicle")
+        if vehicle and vehicle.carrier_id != carrier_profile.id:
+            raise PermissionDenied("Ce véhicule n'appartient pas à votre flotte.")
         serializer.save(carrier=carrier_profile, user=None)
 
     def perform_update(self, serializer):
@@ -254,8 +271,17 @@ class DriverViewSet(viewsets.ModelViewSet):
         carrier_profile = getattr(user, "carrier_profile", None)
         if carrier_profile:
             # Un transporteur ne peut ni réaffecter un chauffeur à un autre
-            # transporteur, ni lier/délier un compte utilisateur lui-même.
-            serializer.save(carrier=carrier_profile, user=serializer.instance.user)
+            # transporteur, ni lier/délier un compte utilisateur lui-même, ni
+            # lever une suspension décidée par l'administration, ni lui
+            # attribuer un véhicule d'une autre flotte.
+            instance = serializer.instance
+            requested_status = serializer.validated_data.get("status", instance.status)
+            if instance.status == Driver.Status.SUSPENDED and requested_status != instance.status:
+                raise PermissionDenied("Seule l'administration peut lever la suspension d'un chauffeur.")
+            vehicle = serializer.validated_data.get("current_vehicle")
+            if vehicle and vehicle.carrier_id != carrier_profile.id:
+                raise PermissionDenied("Ce véhicule n'appartient pas à votre flotte.")
+            serializer.save(carrier=carrier_profile, user=instance.user)
             return
         driver_profile = getattr(user, "driver_profile", None)
         if not driver_profile or driver_profile.id != serializer.instance.id:

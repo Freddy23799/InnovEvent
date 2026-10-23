@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 
 from reportlab.lib.colors import HexColor
@@ -8,6 +9,8 @@ from reportlab.pdfgen import canvas as pdf_canvas
 from apps.documents.company import LOGO_PATH
 from apps.documents.qr_utils import build_qr_png_bytes
 from apps.documents.signing import sign_payload
+
+logger = logging.getLogger(__name__)
 
 # Même langage visuel que le billet payant (apps/tickets/pdf.py) — une seule
 # déclinaison, chaleureuse et formelle, adaptée à une invitation (mariage,
@@ -31,6 +34,7 @@ def _get_logo():
         try:
             _logo_reader = ImageReader(LOGO_PATH)
         except Exception:
+            logger.warning("Logo PDF illisible (%s) : documents générés sans logo.", LOGO_PATH, exc_info=True)
             _logo_reader = False
     return _logo_reader or None
 
