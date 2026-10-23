@@ -295,7 +295,7 @@ onMounted(loadProviders);
     <div v-else-if="providers.length" class="ie-catalog-grid">
       <div v-for="provider in providers" :key="provider.id" class="ie-card ie-catalog-card">
         <div class="ie-catalog-photo">
-          <img v-if="provider.photo" :src="provider.photo" :alt="provider.name" class="ie-zoomable" @click="lightbox.open(provider.photo, provider.name)" />
+          <img v-if="provider.photo" v-img="provider.photo" :alt="provider.name" class="ie-zoomable" @click="lightbox.open(provider.photo, provider.name)" />
           <i v-else :class="icon"></i>
           <span class="ie-badge ie-catalog-availability" :class="provider.is_available ? 'ie-badge-success' : 'ie-badge-danger'">
             {{ provider.is_available ? "Disponible" : "Occupé actuellement" }}

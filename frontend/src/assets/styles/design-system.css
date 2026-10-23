@@ -318,3 +318,30 @@ p { line-height: 1.55; }
   .ie-card-body { padding: 12px; }
   .ie-page-header-actions > .ie-btn { flex: 1 1 auto; }
 }
+
+/* --- Images (directive v-img) ----------------------------------------------
+   Aperçu flou instantané puis image complète, déjà décodée, en fondu : la
+   photo n'apparaît jamais en se dessinant ligne par ligne. */
+img.ie-img-loading { filter: blur(14px); background: #eef0f2; }
+img.ie-img-fade { opacity: 0; }
+img.ie-img-ready { filter: none; opacity: 1; transition: filter 0.45s ease, opacity 0.35s ease; }
+img.ie-img-error { background: #eef0f2 linear-gradient(135deg, #eef0f2, #e2e6ea); }
+@media (prefers-reduced-motion: reduce) {
+  img.ie-img-ready { transition: none; }
+}
+
+/* --- Fluidité ---------------------------------------------------------------
+   Entrée en fondu de chaque écran, et retour visuel immédiat sur les boutons
+   pendant un envoi (ils sont désactivés : impossible de cliquer deux fois). */
+.ie-page-enter { min-width: 0; animation: ie-page-in 0.2s ease both; }
+@keyframes ie-page-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.ie-btn { transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease, opacity 0.15s ease; }
+.ie-btn:active:not(:disabled) { transform: scale(0.98); }
+.ie-skeleton-card { height: 260px; border-radius: 16px; }
+@media (prefers-reduced-motion: reduce) {
+  .ie-page-enter { animation: none; }
+  .ie-btn:active:not(:disabled) { transform: none; }
+}

@@ -130,7 +130,7 @@ onMounted(loadEvents);
         <div v-else class="ie-day-events">
           <div v-for="ev in selectedDayEvents" :key="ev.id" class="ie-day-event-card">
             <div class="ie-day-event-thumb">
-              <img v-if="ev.photo" :src="ev.photo" :alt="ev.title" class="ie-zoomable" @click="lightbox.open(ev.photo, ev.title)" />
+              <img v-if="ev.photo" v-img="ev.photo" :alt="ev.title" class="ie-zoomable" @click="lightbox.open(ev.photo, ev.title)" />
               <i v-else class="fa-solid fa-calendar-week"></i>
             </div>
             <div class="ie-day-event-content">

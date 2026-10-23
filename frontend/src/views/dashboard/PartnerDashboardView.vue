@@ -403,7 +403,7 @@ onMounted(loadData);
       <div class="ie-card" style="overflow: hidden;">
         <div v-if="!showProfileForm">
           <div class="ie-partner-cover" :class="{ 'has-photo': myProfile.cover_photo }">
-            <img v-if="myProfile.cover_photo" :src="myProfile.cover_photo" :alt="myProfile.business_name" />
+            <img v-if="myProfile.cover_photo" v-img="myProfile.cover_photo" :alt="myProfile.business_name" />
             <div class="ie-partner-cover-actions">
               <span v-if="myProfile.is_verified" class="ie-badge ie-badge-success"><i class="fa-solid fa-circle-check"></i> Vérifié</span>
               <router-link
@@ -419,7 +419,7 @@ onMounted(loadData);
           </div>
           <div class="ie-partner-identity">
             <div class="ie-partner-avatar">
-              <img v-if="myProfile.logo" :src="myProfile.logo" :alt="myProfile.business_name" />
+              <img v-if="myProfile.logo" v-img="myProfile.logo" :alt="myProfile.business_name" />
               <i v-else class="fa-solid fa-handshake"></i>
             </div>
             <div class="ie-card-body" style="flex: 1; padding-top: 10px;">
@@ -595,7 +595,7 @@ onMounted(loadData);
         <div v-if="myProfile.services.length" class="ie-service-list">
           <div v-for="s in myProfile.services" :key="s.id" class="ie-service-row">
             <div class="ie-service-photo">
-              <img v-if="s.photo" :src="s.photo" :alt="s.name" />
+              <img v-if="s.photo" v-img="s.photo" :alt="s.name" />
               <i v-else class="fa-solid fa-concierge-bell"></i>
             </div>
             <div class="ie-service-info">
@@ -617,12 +617,12 @@ onMounted(loadData);
         <div class="ie-portfolio-grid">
           <div v-for="p in myProfile.portfolio_items" :key="p.id" class="ie-portfolio-item">
             <div v-if="p.before_image" class="ie-portfolio-before-after">
-              <img :src="p.before_image" alt="Avant" />
-              <img :src="p.image" :alt="p.caption" />
+              <img v-img="p.before_image" alt="Avant" />
+              <img v-img="p.image" :alt="p.caption" />
               <span class="ie-badge ie-badge-neutral ie-portfolio-ba-label ie-portfolio-ba-before">Avant</span>
               <span class="ie-badge ie-badge-neutral ie-portfolio-ba-label ie-portfolio-ba-after">Après</span>
             </div>
-            <img v-else :src="p.image" :alt="p.caption" />
+            <img v-else v-img="p.image" :alt="p.caption" />
             <button class="ie-portfolio-remove" @click="removePortfolioItem(p)"><i class="fa-solid fa-xmark"></i></button>
           </div>
         </div>

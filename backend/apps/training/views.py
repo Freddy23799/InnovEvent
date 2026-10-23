@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -9,6 +10,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import IsAdmin, IsAdminOrReadOnly
 from apps.audit.utils import log_action
 from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
+from apps.payments.idempotency import idempotent_payment
 from apps.payments.models import Payment
 
 from .models import Badge, Certificate, Enrollment, Settlement, Training, TrainingFormula
@@ -80,16 +82,24 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         return Response(EnrollmentSerializer(enrollment).data)
 
     @action(detail=True, methods=["post"])
+    @idempotent_payment
     def pay(self, request, pk=None):
         """Règle une tranche des frais de formation via une passerelle de paiement
         (section 13 du CDC : suivi des frais dus, montants versés, solde). Chaque
         paiement réussi crée automatiquement un règlement (une « tranche »)."""
-        enrollment = self.get_object()
+        enrollment_pk = self.get_object().pk
+        serializer = EnrollmentPaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            # Verrou de ligne : deux paiements simultanés ne peuvent plus
+            # dépasser le solde restant (chacun relit le solde après l'autre).
+            enrollment = Enrollment.objects.select_for_update().get(pk=enrollment_pk)
+            return self._charge_enrollment(request, enrollment, serializer)
+
+    def _charge_enrollment(self, request, enrollment, serializer):
         if enrollment.balance <= 0:
             return Response({"detail": "Cette inscription est déjà entièrement réglée."}, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = EnrollmentPaymentSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
         amount = serializer.validated_data["amount"]
         provider = serializer.validated_data["payment_provider"]
 

@@ -146,7 +146,7 @@ onMounted(loadDashboard);
 
     <div v-if="!loading && nextEvent" class="ie-spotlight">
       <div class="ie-spotlight-photo" :class="{ 'is-empty': !nextEvent.photo }">
-        <img v-if="nextEvent.photo" :src="nextEvent.photo" :alt="nextEvent.title" class="ie-zoomable" @click="lightbox.open(nextEvent.photo, nextEvent.title)" />
+        <img v-if="nextEvent.photo" v-img="nextEvent.photo" :alt="nextEvent.title" class="ie-zoomable" @click="lightbox.open(nextEvent.photo, nextEvent.title)" />
         <i v-else class="fa-solid fa-calendar-week"></i>
       </div>
       <div class="ie-spotlight-body">
@@ -251,7 +251,7 @@ onMounted(loadDashboard);
             <tr v-for="event in events" :key="event.id">
               <td>
                 <div class="ie-event-thumb">
-                  <img v-if="event.photo" :src="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
+                  <img v-if="event.photo" v-img="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
                   <i v-else class="fa-solid fa-calendar-week"></i>
                 </div>
               </td>

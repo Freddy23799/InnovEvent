@@ -89,7 +89,7 @@ onMounted(loadData);
     <h1><i class="fa-solid fa-building" style="color: var(--ie-red); margin-right: 8px;"></i>Mon profil entreprise</h1>
     <p class="ie-page-subtitle">Informations légales et documents justificatifs utilisés par l'administration pour la vérification.</p>
 
-    <div v-if="loading" class="ie-card ie-card-body" style="margin-top: 16px;">Chargement…</div>
+    <div v-if="loading" class="ie-skeleton" style="height: 360px; margin-top: 16px; border-radius: 14px;" aria-busy="true"></div>
     <EmptyState
       v-else-if="notFound" icon="fa-solid fa-building"
       text="Aucun profil entreprise n'est lié à votre compte."

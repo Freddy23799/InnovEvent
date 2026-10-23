@@ -243,12 +243,12 @@ onMounted(() => {
           :to="{ name: 'admin-pack-manage', params: { packId: item.id } }"
           class="lm-card-photo lm-card-photo-link"
         >
-          <img :src="item.photo" :alt="item.label" />
+          <img v-img="item.photo" :alt="item.label" />
           <span v-if="!item.is_active" class="lm-hidden-badge">Masqué</span>
           <span class="lm-manage-overlay"><i class="fa-solid fa-pen-to-square"></i> Gérer le pack</span>
         </router-link>
         <div v-else class="lm-card-photo">
-          <img :src="item.photo" :alt="item.label" />
+          <img v-img="item.photo" :alt="item.label" />
           <span v-if="!item.is_active" class="lm-hidden-badge">Masqué</span>
         </div>
         <div class="lm-card-body">

@@ -96,6 +96,7 @@ class SubscribeSerializer(serializers.Serializer):
         default="demo",
     )
     tier = serializers.PrimaryKeyRelatedField(queryset=SubscriptionTier.objects.all(), required=False, allow_null=True)
+    confirm_renewal = serializers.BooleanField(default=False, help_text="Prolonger volontairement un abonnement payé il y a moins de 10 minutes.")
 
 
 class ProfessionalServiceSerializer(serializers.ModelSerializer):

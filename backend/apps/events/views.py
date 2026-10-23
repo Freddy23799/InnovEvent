@@ -13,6 +13,7 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
 
 from apps.accounts.permissions import IsAdminClientOrOrganizer, IsOwnerOrAdmin
+from apps.documents.image_variants import requested_width, variant_response
 from apps.documents.reports import build_table_report_pdf
 from apps.notifications.services import send_event_invitation_email
 
@@ -41,6 +42,9 @@ def public_event_photo_file(request, path):
         if signed_data.get("photo") != storage_name or not event_photos.exists():
             raise Http404("Photo d'événement introuvable.")
 
+    width = requested_width(request)
+    if width:
+        return variant_response(storage_name, width, "public, max-age=604800" if is_public_photo else "private, no-store")
     try:
         photo = default_storage.open(storage_name, "rb")
     except (FileNotFoundError, OSError, ValueError):
@@ -50,7 +54,7 @@ def public_event_photo_file(request, path):
     response = FileResponse(photo, content_type=content_type)
     response["X-Content-Type-Options"] = "nosniff"
     if is_public_photo:
-        response["Cache-Control"] = "public, max-age=3600"
+        response["Cache-Control"] = "public, max-age=604800"
     else:
         response["Cache-Control"] = "private, no-store"
     return response

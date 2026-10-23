@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
 import SkeletonTable from "../../components/SkeletonTable.vue";
 import api from "../../services/api";
+import { paymentErrorMessage, postPayment } from "../../services/payments";
 import { useAuthStore } from "../../stores/auth";
 import { useLightboxStore } from "../../stores/lightbox";
 
@@ -107,11 +108,11 @@ async function confirmPayment(enrollment) {
   paying.value = true;
   payError.value = "";
   try {
-    await api.post(`/training/enrollments/${enrollment.id}/pay/`, { amount: payAmount.value, payment_provider: payProvider.value });
+    await postPayment(`training:${enrollment.id}:${payAmount.value}`, `/training/enrollments/${enrollment.id}/pay/`, { amount: payAmount.value, payment_provider: payProvider.value });
     payFormFor.value = null;
     await loadData();
   } catch (e) {
-    payError.value = e?.response?.data?.detail || "Le paiement a échoué.";
+    payError.value = paymentErrorMessage(e, "Le paiement a échoué.");
   } finally {
     paying.value = false;
   }
@@ -238,7 +239,7 @@ onMounted(loadData);
               <tr>
                 <td>
                   <div class="ie-enroll-photo">
-                    <img v-if="enrollment.photo" :src="enrollment.photo" :alt="enrollment.participant_name" class="ie-zoomable" @click="lightbox.open(enrollment.photo, enrollment.participant_name)" />
+                    <img v-if="enrollment.photo" v-img="enrollment.photo" :alt="enrollment.participant_name" class="ie-zoomable" @click="lightbox.open(enrollment.photo, enrollment.participant_name)" />
                     <i v-else class="fa-solid fa-user"></i>
                   </div>
                 </td>

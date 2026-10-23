@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import logo from "../../assets/images/logo-mark.png";
 import api from "../../services/api";
+import { imageVariant, preloadImage } from "../../services/media";
 
 const email = ref("");
 const loading = ref(false);
@@ -12,7 +13,9 @@ const heroPhoto = ref(null);
 onMounted(async () => {
   try {
     const { data } = await api.get("/public/landing-media/", { params: { category: "realisation" } });
-    heroPhoto.value = data.find((item) => item.photo)?.photo || null;
+    const photo = imageVariant(data.find((item) => item.photo)?.photo || null, window.innerWidth / 2);
+    // Affichée une fois décodée : le fond n'apparaît pas morceau par morceau.
+    if (photo) heroPhoto.value = await preloadImage(photo);
   } catch {
     heroPhoto.value = null;
   }

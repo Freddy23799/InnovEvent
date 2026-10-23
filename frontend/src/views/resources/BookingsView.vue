@@ -246,7 +246,7 @@ onMounted(async () => {
         </div>
 
         <div v-if="lockedResource" class="ie-booking-locked">
-          <img v-if="lockedResource.photo" :src="lockedResource.photo" :alt="lockedResource.name" class="ie-booking-locked-photo" />
+          <img v-if="lockedResource.photo" v-img="lockedResource.photo" :alt="lockedResource.name" class="ie-booking-locked-photo" />
           <div v-else class="ie-booking-locked-photo ie-booking-locked-placeholder"><i class="fa-solid" :class="LOCKED_RESOURCE_ICONS[form.resource_type]"></i></div>
           <div>
             <span class="ie-booking-locked-type">{{ LOCKED_RESOURCE_LABELS[form.resource_type] }}</span>

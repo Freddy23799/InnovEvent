@@ -216,7 +216,7 @@ onMounted(loadTrainings);
               <tr>
                 <td>
                   <div class="ie-training-thumb">
-                    <img v-if="training.photo" :src="training.photo" :alt="training.name" class="ie-zoomable" @click="lightbox.open(training.photo, training.name)" />
+                    <img v-if="training.photo" v-img="training.photo" :alt="training.name" class="ie-zoomable" @click="lightbox.open(training.photo, training.name)" />
                     <i v-else class="fa-solid fa-graduation-cap"></i>
                   </div>
                 </td>

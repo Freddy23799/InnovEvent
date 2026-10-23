@@ -290,7 +290,7 @@ onMounted(loadEquipment);
     <div v-else-if="equipment.length" class="ie-catalog-grid">
       <div v-for="item in equipment" :key="item.id" class="ie-card ie-catalog-card">
         <div class="ie-catalog-photo">
-          <img v-if="item.photo" :src="item.photo" :alt="item.name" class="ie-zoomable" @click="lightbox.open(item.photo, item.name)" />
+          <img v-if="item.photo" v-img="item.photo" :alt="item.name" class="ie-zoomable" @click="lightbox.open(item.photo, item.name)" />
           <i v-else class="fa-solid fa-sliders"></i>
           <span class="ie-badge ie-catalog-availability" :class="item.is_available ? 'ie-badge-success' : 'ie-badge-danger'">
             {{ item.is_available ? "Disponible" : "Épuisé actuellement" }}

@@ -466,7 +466,7 @@ onMounted(loadData);
       <i class="fa-solid fa-arrow-left"></i> Retour
     </button>
 
-    <div v-if="loading" class="ie-card ie-card-body">Chargement…</div>
+    <div v-if="loading" class="ie-skeleton" style="height: 420px; border-radius: 14px;" aria-busy="true"></div>
     <EmptyState v-else-if="notFound" icon="fa-solid fa-triangle-exclamation" text="Livraison introuvable." />
 
     <template v-else-if="delivery">

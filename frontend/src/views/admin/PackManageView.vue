@@ -256,7 +256,7 @@ onMounted(() => {
           <div v-if="packItems.length" class="pm-items-list">
             <div v-for="pi in packItems" :key="pi.id" class="pm-item-row">
               <div class="pm-item-thumb">
-                <img v-if="pi.resource_photo" :src="pi.resource_photo" :alt="pi.resource_name" />
+                <img v-if="pi.resource_photo" v-img="pi.resource_photo" :alt="pi.resource_name" />
                 <i v-else class="fa-solid fa-image"></i>
               </div>
               <span class="ie-badge ie-badge-neutral">{{ RESOURCE_TYPES.find((r) => r.value === pi.resource_type)?.label }}</span>

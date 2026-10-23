@@ -11,6 +11,7 @@ from apps.accounts.permissions import IsAdminClientOrOrganizer
 from apps.audit.utils import log_action
 from apps.notifications.services import notify_booking_created, notify_booking_status_changed, send_booking_receipt_email
 from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
+from apps.payments.idempotency import idempotent_payment
 from apps.payments.models import Payment
 from apps.referrals.services import apply_coupon, redeem_coupon
 
@@ -55,6 +56,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             notify_booking_status_changed(booking)
 
     @action(detail=True, methods=["post"])
+    @idempotent_payment
     def pay(self, request, pk=None):
         """Règle une réservation à tarification numérique (salle, matériel) via une
         passerelle de paiement, puis confirme la réservation et génère le reçu.

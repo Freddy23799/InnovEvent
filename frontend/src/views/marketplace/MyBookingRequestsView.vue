@@ -2,7 +2,10 @@
 import { reactive, onMounted, ref } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
 import api from "../../services/api";
+import { useToastStore } from "../../stores/toast";
+import { paymentErrorMessage, postPayment } from "../../services/payments";
 
+const toast = useToastStore();
 const STATUS_META = {
   pending: { label: "En attente de réponse", badge: "ie-badge-neutral" },
   quoted: { label: "Devis reçu", badge: "ie-badge-warning" },
@@ -72,10 +75,12 @@ async function requestModification(quote) {
 async function payQuote(quote) {
   actionBusy[quote.id] = true;
   try {
-    await api.post(`/marketplace/quotes/${quote.id}/pay/`, {
+    await postPayment(`quote:${quote.id}`, `/marketplace/quotes/${quote.id}/pay/`, {
       payment_provider: "demo", coupon_code: quoteCoupon[quote.id] || undefined,
     });
     await loadData();
+  } catch (e) {
+    toast.error(paymentErrorMessage(e));
   } finally {
     actionBusy[quote.id] = false;
   }

@@ -5,7 +5,10 @@ import mtnLogo from "../assets/images/payment/mtn.svg";
 import orangeMoneyLogo from "../assets/images/payment/orange-money.svg";
 import visaLogo from "../assets/images/payment/visa.svg";
 import api from "../services/api";
+import { useToastStore } from "../stores/toast";
+import { paymentErrorMessage, postPayment } from "../services/payments";
 
+const toast = useToastStore();
 const props = defineProps({
   marketplaceType: { type: String, required: true },
   marketplaceLabel: { type: String, required: true },
@@ -70,7 +73,8 @@ async function confirmSubscription() {
   }
   submitting.value = true;
   try {
-    const { data } = await api.post("/marketplace/subscriptions/", {
+    const intent = `subscription:${props.marketplaceType}:${selectedPlanCode.value}:${selectedTierId.value ?? ""}`;
+    const { data } = await postPayment(intent, "/marketplace/subscriptions/", {
       marketplace_type: props.marketplaceType,
       plan: selectedPlanCode.value,
       payment_provider: selectedPayment.value,
@@ -79,7 +83,14 @@ async function confirmSubscription() {
     success.value = true;
     setTimeout(() => emit("subscribed", data), 1200);
   } catch (e) {
-    errorMessage.value = e?.response?.data?.detail || "Le paiement a échoué. Réessayez ou choisissez un autre moyen de paiement.";
+    if (e?.response?.data?.code === "subscription_recently_paid") {
+      // Déjà payé à l'instant (autre onglet, essai précédent) : rien n'a été
+      // débité de nouveau, on affiche simplement l'abonnement actif.
+      toast.success(e.response.data.detail);
+      emit("subscribed", e.response.data.subscription);
+      return;
+    }
+    errorMessage.value = paymentErrorMessage(e);
   } finally {
     submitting.value = false;
   }

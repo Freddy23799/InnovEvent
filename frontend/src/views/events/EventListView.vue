@@ -198,7 +198,7 @@ onMounted(loadEvents);
               <td class="ie-num">{{ index + 1 }}</td>
               <td>
                 <div class="ie-event-thumb">
-                  <img v-if="event.photo" :src="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
+                  <img v-if="event.photo" v-img="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
                   <i v-else class="fa-solid fa-calendar-week"></i>
                 </div>
               </td>

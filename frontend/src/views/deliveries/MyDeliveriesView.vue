@@ -89,7 +89,7 @@ onMounted(loadData);
     <h1><i class="fa-solid fa-truck-fast" style="color: var(--ie-red); margin-right: 8px;"></i>Mes livraisons</h1>
     <p class="ie-page-subtitle">Missions qui vous sont affectées en tant que chauffeur.</p>
 
-    <div v-if="loading" class="ie-card ie-card-body">Chargement…</div>
+    <div v-if="loading" class="ie-skeleton" style="height: 240px; border-radius: 14px;" aria-busy="true"></div>
 
     <template v-else>
       <EmptyState

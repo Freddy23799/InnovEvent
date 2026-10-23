@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import EmptyState from "../../components/EmptyState.vue";
 import api from "../../services/api";
+import { paymentErrorMessage, postPayment } from "../../services/payments";
 import { useAuthStore } from "../../stores/auth";
 import { useLightboxStore } from "../../stores/lightbox";
 
@@ -114,7 +115,7 @@ async function buyTicket() {
   }
   purchasing.value = true;
   try {
-    await api.post("/tickets/purchase/", {
+    await postPayment(`ticket:${form.ticketType}:${form.quantity}`, "/tickets/purchase/", {
       ticket_type: form.ticketType,
       quantity: form.quantity,
       payment_provider: form.paymentProvider,
@@ -127,7 +128,7 @@ async function buyTicket() {
     await reloadTicketTypes();
   } catch (e) {
     const d = e?.response?.data;
-    purchaseError.value = d?.detail || d?.non_field_errors?.[0] || "L'achat a échoué.";
+    purchaseError.value = paymentErrorMessage(e, "L'achat a échoué.");
     if ([400, 409].includes(e?.response?.status)) {
       try { await reloadTicketTypes(); } catch { /* Le message d'erreur de l'achat reste affiché. */ }
     }
@@ -147,7 +148,7 @@ onMounted(loadEvent);
 
     <div v-else class="ie-ticket-page">
       <div class="ie-ticket-photo" :class="{ 'is-empty': !event.photo }">
-        <img v-if="event.photo" :src="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
+        <img v-if="event.photo" v-img.eager="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
         <i v-else class="fa-solid fa-calendar-week"></i>
         <span v-if="minPrice !== null" class="ie-ticket-price-badge">
           à partir de {{ minPrice.toLocaleString('fr-FR') }} {{ ticketTypes[0].currency }}

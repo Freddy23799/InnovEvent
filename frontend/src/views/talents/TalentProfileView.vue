@@ -140,7 +140,7 @@ onMounted(loadData);
     <h1><i class="fa-solid fa-star" style="color: var(--ie-red); margin-right: 8px;"></i>Mon profil talent</h1>
     <p class="ie-page-subtitle">Complétez votre profil et vos réalisations, puis rendez-le visible auprès des prestataires.</p>
 
-    <div v-if="loading" class="ie-card ie-card-body" style="margin-top: 16px;">Chargement…</div>
+    <div v-if="loading" class="ie-skeleton" style="height: 360px; margin-top: 16px; border-radius: 14px;" aria-busy="true"></div>
     <EmptyState
       v-else-if="notFound" icon="fa-solid fa-star"
       text="Aucun profil talent n'est lié à votre compte."
@@ -219,7 +219,7 @@ onMounted(loadData);
 
           <label class="ie-label" style="margin-top: 14px;">Photo</label>
           <input type="file" accept="image/*" class="ie-input" @change="photoFile = $event.target.files[0] || null" />
-          <img v-if="currentPhoto && !photoFile" :src="currentPhoto" alt="Photo actuelle" class="ie-doc-thumb" />
+          <img v-if="currentPhoto && !photoFile" v-img="currentPhoto" alt="Photo actuelle" class="ie-doc-thumb" />
 
           <p v-if="errorMessage" class="ie-alert ie-alert-danger" style="margin-top: 12px;">{{ errorMessage }}</p>
           <button class="ie-btn ie-btn-primary" type="submit" style="margin-top: 16px;" :disabled="submitting">
@@ -232,7 +232,7 @@ onMounted(loadData);
         <h3 class="ie-doc-section-title">Mes réalisations</h3>
         <div class="ie-portfolio-grid">
           <div v-for="item in portfolioItems" :key="item.id" class="ie-portfolio-item">
-            <img :src="item.image" :alt="item.caption" />
+            <img v-img="item.image" :alt="item.caption" />
             <button type="button" class="ie-portfolio-remove" @click="removePortfolioItem(item)"><i class="fa-solid fa-xmark"></i></button>
           </div>
         </div>

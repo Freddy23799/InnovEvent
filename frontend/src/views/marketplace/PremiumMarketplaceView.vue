@@ -11,6 +11,7 @@ import { citiesForCountry } from "../../data/countries";
 import { EVENT_TYPE_CATEGORY_MAP, EVENT_TYPES } from "../../data/eventTypeCategories";
 import { CLIENT_TYPES, INTERIOR_DESIGN_CATEGORY_GROUPS, INTERIOR_DESIGN_CATEGORY_LOOKUP, PRICE_RANGES } from "../../data/interiorDesignCategories";
 import api from "../../services/api";
+import { paymentErrorMessage, postPayment } from "../../services/payments";
 import { useMarketplaceAccessStore } from "../../stores/marketplaceAccess";
 import { useToastStore } from "../../stores/toast";
 
@@ -81,6 +82,7 @@ const listingsLoading = ref(false);
 const ordering = reactive({});
 const orderError = reactive({});
 const orderSuccess = reactive({});
+const orderBusy = reactive({});
 const orderCoupon = reactive({});
 
 const profiles = ref([]);
@@ -379,16 +381,20 @@ async function toggleFavoriteRecommended(profile) {
 async function orderListing(listing) {
   orderError[listing.id] = "";
   orderSuccess[listing.id] = "";
+  orderBusy[listing.id] = true;
+  const quantity = ordering[listing.id] || 1;
   try {
-    await api.post("/marketplace/orders/pay/", {
+    await postPayment(`order:${listing.id}:${quantity}`, "/marketplace/orders/pay/", {
       listing: listing.id,
-      quantity: ordering[listing.id] || 1,
+      quantity,
       payment_provider: "demo",
       coupon_code: orderCoupon[listing.id] || undefined,
     });
     orderSuccess[listing.id] = "Commande payée avec succès.";
   } catch (e) {
-    orderError[listing.id] = e?.response?.data?.detail || "La commande a échoué.";
+    orderError[listing.id] = paymentErrorMessage(e, "La commande a échoué.");
+  } finally {
+    orderBusy[listing.id] = false;
   }
 }
 
@@ -585,7 +591,7 @@ watch(
                 <i :class="profile.is_favorited ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
               </button>
               <div class="ie-pro-cover">
-                <img v-if="profile.cover_photo" :src="profile.cover_photo" :alt="profile.business_name" />
+                <img v-if="profile.cover_photo" v-img="profile.cover_photo" :alt="profile.business_name" />
                 <i v-else class="fa-solid fa-image"></i>
                 <span v-if="profile.is_verified" class="ie-badge ie-badge-success ie-pro-verified">
                   <i class="fa-solid fa-circle-check"></i> {{ $t("marketplace.verified") }}
@@ -701,7 +707,7 @@ watch(
           <div v-else-if="filteredListings.length" class="ie-catalog-grid">
             <div v-for="listing in filteredListings" :key="listing.id" class="ie-card ie-listing-card">
               <div class="ie-listing-photo">
-                <img v-if="listing.photo" :src="listing.photo" :alt="listing.title" />
+                <img v-if="listing.photo" v-img="listing.photo" :alt="listing.title" />
                 <i v-else class="fa-solid fa-box-open"></i>
                 <span class="ie-badge ie-badge-neutral ie-listing-seller-badge">
                   <i class="fa-solid" :class="listing.provider_name || listing.created_by_name ? 'fa-handshake' : 'fa-store'"></i>
@@ -719,7 +725,7 @@ watch(
                     <span>{{ ordering[listing.id] || 1 }}</span>
                     <button type="button" @click="incrementQty(listing)"><i class="fa-solid fa-plus"></i></button>
                   </div>
-                  <button class="ie-btn ie-btn-primary ie-btn-sm" @click="orderListing(listing)">
+                  <button class="ie-btn ie-btn-primary ie-btn-sm" :disabled="orderBusy[listing.id]" @click="orderListing(listing)">
                     <i class="fa-solid fa-cart-shopping"></i> Commander · {{ subtotal(listing).toLocaleString('fr-FR') }} {{ listing.currency }}
                   </button>
                 </div>
@@ -817,7 +823,7 @@ watch(
               class="ie-card ie-pro-card ie-pro-card-lg"
             >
               <div class="ie-pro-cover">
-                <img v-if="profile.cover_photo" :src="profile.cover_photo" :alt="profile.business_name" />
+                <img v-if="profile.cover_photo" v-img="profile.cover_photo" :alt="profile.business_name" />
                 <i v-else class="fa-solid fa-image"></i>
 
                 <div class="ie-pro-cover-actions">

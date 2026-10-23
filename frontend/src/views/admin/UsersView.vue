@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, onUnmounted, reactive, ref } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
 import SkeletonTable from "../../components/SkeletonTable.vue";
 import api from "../../services/api";
@@ -94,10 +94,12 @@ async function remindUser(user) {
   }
 }
 
+let refreshHandle = null;
 onMounted(() => {
   loadUsers();
-  setInterval(loadUsers, 30000);
+  refreshHandle = setInterval(loadUsers, 30000);
 });
+onUnmounted(() => clearInterval(refreshHandle));
 </script>
 
 <template>

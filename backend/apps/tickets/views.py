@@ -14,6 +14,7 @@ from apps.accounts.permissions import IsAdmin, IsAdminOrOrganizer, IsEmployee
 from apps.audit.utils import log_action
 from apps.notifications.services import notify_user, send_ticket_confirmation_email
 from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
+from apps.payments.idempotency import idempotent_payment
 from apps.payments.models import Payment
 
 from .models import Ticket, TicketType
@@ -131,6 +132,7 @@ class TicketPurchaseView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "ticket_purchase"
 
+    @idempotent_payment
     @transaction.atomic
     def post(self, request):
         serializer = TicketPurchaseSerializer(data=request.data)

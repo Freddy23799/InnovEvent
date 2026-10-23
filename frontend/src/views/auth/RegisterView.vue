@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import logo from "../../assets/images/logo-mark.png";
 import { ACTOR_CATEGORY_GROUPS } from "../../data/actorCategories";
 import api from "../../services/api";
+import { imageVariant, preloadImage } from "../../services/media";
 import { useAuthStore } from "../../stores/auth";
 
 const auth = useAuthStore();
@@ -151,7 +152,9 @@ const loading = ref(false);
 onMounted(async () => {
   try {
     const { data } = await api.get("/public/landing-media/", { params: { category: "deco" } });
-    heroPhoto.value = data.find((item) => item.photo)?.photo || null;
+    const photo = imageVariant(data.find((item) => item.photo)?.photo || null, window.innerWidth / 2);
+    // Affichée une fois décodée : le fond n'apparaît pas morceau par morceau.
+    if (photo) heroPhoto.value = await preloadImage(photo);
   } catch {
     heroPhoto.value = null;
   }

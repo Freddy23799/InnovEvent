@@ -16,6 +16,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.models import User
 from apps.accounts.permissions import IsAdmin, IsAdminOrPublicReadOnly
 from apps.messaging.models import Conversation
 from apps.notifications.services import (
@@ -27,6 +28,7 @@ from apps.notifications.services import (
     notify_quote_sent,
 )
 from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
+from apps.payments.idempotency import idempotent_payment
 from apps.payments.models import Payment
 from apps.referrals.services import apply_coupon, redeem_coupon
 
@@ -123,6 +125,12 @@ def distance_km_expression(from_lat, from_lng):
     return ExpressionWrapper(ACos(clamped) * EARTH_RADIUS_KM, output_field=FloatField())
 
 
+
+# Un second paiement d'abonnement dans cet intervalle est presque toujours
+# accidentel (double clic, nouvel essai après coupure) : il est refusé sauf
+# confirmation explicite (`confirm_renewal`).
+RECENT_SUBSCRIPTION_WINDOW = timedelta(minutes=10)
+
 class CanManageOwnListing(permissions.BasePermission):
     """L'administration gère toutes les annonces ; un partenaire ne gère que
     celles dont il est propriétaire (`created_by`)."""
@@ -205,6 +213,7 @@ class MarketplaceOrderPaymentView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @idempotent_payment
     def post(self, request):
         serializer = MarketplaceOrderPaymentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -321,6 +330,7 @@ class MarketplaceSubscriptionView(APIView):
             "marketplaces": marketplaces,
         })
 
+    @idempotent_payment
     def post(self, request):
         serializer = SubscribeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -342,6 +352,29 @@ class MarketplaceSubscriptionView(APIView):
             return Response({"detail": "Formule d'abonnement inconnue."}, status=status.HTTP_400_BAD_REQUEST)
         provider = serializer.validated_data["payment_provider"]
 
+        # Un seul paiement d'abonnement à la fois par compte, et pas de second
+        # paiement juste après le premier (fenêtre fermée puis rouverte après
+        # une coupure réseau, deux onglets...) : le client serait débité deux
+        # fois pour une prolongation qu'il n'a pas voulue.
+        with transaction.atomic():
+            User.objects.select_for_update().get(pk=request.user.pk)
+            recent = MarketplaceSubscription.objects.filter(
+                user=request.user, marketplace_type=marketplace_type,
+                renewed_at__gt=timezone.now() - RECENT_SUBSCRIPTION_WINDOW,
+            ).first()
+            if recent and not serializer.validated_data.get("confirm_renewal"):
+                return Response(
+                    {
+                        "detail": "Votre abonnement vient d'être payé et est actif jusqu'au "
+                        f"{timezone.localtime(recent.expires_at):%d/%m/%Y}. Aucun nouveau paiement n'a été effectué.",
+                        "code": "subscription_recently_paid",
+                        "subscription": MarketplaceSubscriptionSerializer(recent).data,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return self._charge_subscription(request, serializer, marketplace_type, plan, provider)
+
+    def _charge_subscription(self, request, serializer, marketplace_type, plan, provider):
         payment = Payment.objects.create(
             user=request.user,
             amount=plan.price,
@@ -378,7 +411,8 @@ class MarketplaceSubscriptionView(APIView):
         base = sub.expires_at if sub.expires_at > timezone.now() else timezone.now()
         sub.expires_at = base + timezone.timedelta(days=plan.duration_days)
         sub.tier = tier
-        sub.save(update_fields=["expires_at", "tier"])
+        sub.renewed_at = timezone.now()
+        sub.save(update_fields=["expires_at", "tier", "renewed_at"])
 
         return Response(MarketplaceSubscriptionSerializer(sub).data)
 
@@ -1022,6 +1056,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
         return Response(QuoteSerializer(quote).data)
 
     @action(detail=True, methods=["post"])
+    @idempotent_payment
     def pay(self, request, pk=None):
         quote = self.get_object()
         self._client_only(quote, request)

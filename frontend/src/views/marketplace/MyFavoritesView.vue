@@ -52,11 +52,11 @@ onMounted(loadData);
         </button>
         <router-link :to="{ name: 'professional-profile-detail', params: { id: f.profile } }" class="ie-favorite-link">
           <div class="ie-favorite-cover">
-            <img v-if="f.profile_detail.cover_photo" :src="f.profile_detail.cover_photo" :alt="f.profile_detail.business_name" />
+            <img v-if="f.profile_detail.cover_photo" v-img="f.profile_detail.cover_photo" :alt="f.profile_detail.business_name" />
             <i v-else class="fa-solid fa-image"></i>
           </div>
           <div class="ie-favorite-logo">
-            <img v-if="f.profile_detail.logo" :src="f.profile_detail.logo" :alt="f.profile_detail.business_name" />
+            <img v-if="f.profile_detail.logo" v-img="f.profile_detail.logo" :alt="f.profile_detail.business_name" />
             <i v-else class="fa-solid fa-handshake"></i>
           </div>
           <div class="ie-card-body" style="padding-top: 6px;">

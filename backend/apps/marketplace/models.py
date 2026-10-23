@@ -85,6 +85,9 @@ class MarketplaceSubscription(models.Model):
         help_text="Palier souscrit — détermine l'accès aux fonctionnalités qui exigent un palier minimum.",
     )
     expires_at = models.DateTimeField()
+    renewed_at = models.DateTimeField(
+        null=True, blank=True, help_text="Dernier paiement réussi — bloque un second paiement accidentel juste après.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

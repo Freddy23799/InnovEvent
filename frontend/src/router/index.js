@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 import api from "../services/api";
+import { doneProgress, startProgress } from "../services/progress";
 
 const routes = [
   {
@@ -587,6 +588,23 @@ const router = createRouter({
   },
 });
 
+// Barre de progression pendant le chargement d'un écran (code et gardes).
+let navigating = false;
+router.beforeEach(() => {
+  if (!navigating) {
+    navigating = true;
+    startProgress();
+  }
+});
+function endNavigation() {
+  if (navigating) {
+    navigating = false;
+    doneProgress();
+  }
+}
+router.afterEach(endNavigation);
+router.onError(endNavigation);
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (!to.meta.public && !auth.isAuthenticated) {
@@ -598,22 +616,32 @@ router.beforeEach(async (to) => {
   if (to.meta.roles && !to.meta.roles.includes(auth.role)) {
     return { name: "dashboard" };
   }
-  if (to.meta.talentOnly) {
-    try {
-      await api.get("/talents/me/");
-    } catch {
-      return { name: "dashboard" };
-    }
-  }
-  if (to.meta.providerOnly) {
-    try {
-      await api.get("/talents/me/");
-      return { name: "dashboard" };
-    } catch {
-      // Un compte partenaire sans profil talent (prestataire) consulte les talents.
-    }
+  if (to.meta.talentOnly || to.meta.providerOnly) {
+    const isTalent = await hasTalentProfile(auth.user?.id);
+    if (to.meta.talentOnly && !isTalent) return { name: "dashboard" };
+    // Un compte partenaire sans profil talent (prestataire) consulte les talents.
+    if (to.meta.providerOnly && isTalent) return { name: "dashboard" };
   }
   return true;
 });
+
+// Mémorisé par compte : sans cela, chaque clic vers une page talent/prestataire
+// attendait un aller-retour serveur avant de s'afficher. Seul un 404 signifie
+// « pas de profil talent » ; une erreur réseau n'est pas mémorisée.
+let talentProfileCheck = { userId: null, promise: null };
+function hasTalentProfile(userId) {
+  if (talentProfileCheck.userId !== userId || !talentProfileCheck.promise) {
+    const promise = api.get("/talents/me/").then(
+      () => true,
+      (error) => {
+        if (error?.response?.status === 404) return false;
+        talentProfileCheck = { userId: null, promise: null };
+        return false;
+      },
+    );
+    talentProfileCheck = { userId, promise };
+  }
+  return talentProfileCheck.promise;
+}
 
 export default router;

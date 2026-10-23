@@ -18,6 +18,7 @@ from django.views.decorators.http import require_GET
 
 from apps.accounts.permissions import IsAdminOrPublicReadOnly
 from apps.bookings.serializers import BookingSerializer
+from apps.documents.image_variants import requested_width, variant_response
 from apps.events.models import Event
 from apps.notifications.services import notify_booking_created
 
@@ -42,6 +43,9 @@ def public_landing_media_file(request, path):
 
         raise Http404("Média public introuvable.")
 
+    width = requested_width(request)
+    if width:
+        return variant_response(storage_name, width, PUBLIC_IMAGE_CACHE)
     try:
         file_handle = default_storage.open(storage_name, "rb")
     except (FileNotFoundError, OSError):
@@ -50,7 +54,10 @@ def public_landing_media_file(request, path):
         raise Http404("Fichier média introuvable.")
 
     content_type = mimetypes.guess_type(storage_name)[0] or "application/octet-stream"
-    return FileResponse(file_handle, content_type=content_type)
+    response = FileResponse(file_handle, content_type=content_type)
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = PUBLIC_IMAGE_CACHE
+    return response
 
 
 # Images de catalogue affichées publiquement (salles, matériel, prestataires,
@@ -77,6 +84,9 @@ PUBLIC_MEDIA_FIELDS = {
     ],
 }
 PUBLIC_MEDIA_PREFIXES = tuple(PUBLIC_MEDIA_FIELDS)
+# Une semaine en cache navigateur : une photo remplacée reçoit un nouveau nom
+# de fichier, donc une nouvelle URL.
+PUBLIC_IMAGE_CACHE = "public, max-age=604800"
 PUBLIC_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 
@@ -102,6 +112,9 @@ def public_media_file(request, path):
     # Pas de SVG : servi depuis notre domaine, il pourrait exécuter du script.
     if content_type not in PUBLIC_IMAGE_TYPES or not _is_public_media(path):
         raise Http404("Média introuvable.")
+    width = requested_width(request)
+    if width:
+        return variant_response(path, width, PUBLIC_IMAGE_CACHE)
     try:
         file_handle = default_storage.open(path, "rb")
     except (FileNotFoundError, OSError):
@@ -110,7 +123,7 @@ def public_media_file(request, path):
     response = FileResponse(file_handle, content_type=content_type)
     response["X-Content-Type-Options"] = "nosniff"
     response["Content-Security-Policy"] = "default-src 'none'; sandbox"
-    response["Cache-Control"] = "public, max-age=86400"
+    response["Cache-Control"] = PUBLIC_IMAGE_CACHE
     return response
 
 

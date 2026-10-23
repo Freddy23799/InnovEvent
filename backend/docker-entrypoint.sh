@@ -25,6 +25,8 @@ python manage.py seed_landing_media /opt/innovevent-seed/acceuil --if-empty
 # La commande est idempotente et ne remplace pas les réglages existants.
 python manage.py seed_marketplace_features
 python manage.py collectstatic --noinput
+# Versions WebP allégées des photos publiques (rapide, ne refait que le manquant).
+python manage.py warm_image_variants || echo "Préparation des images incomplète : elles seront générées à la demande."
 
 # Daphne (ASGI) plutôt que gunicorn (WSGI) : un seul processus sert à la fois
 # l'API REST classique et les WebSocket temps réel (apps/notifications).

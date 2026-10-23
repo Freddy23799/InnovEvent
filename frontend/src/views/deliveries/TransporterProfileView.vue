@@ -69,7 +69,7 @@ onMounted(loadData);
     <h1><i class="fa-solid fa-truck-fast" style="color: var(--ie-red); margin-right: 8px;"></i>Mon profil transporteur</h1>
     <p class="ie-page-subtitle">Les informations affichées à l'administration et utilisées pour l'affectation de vos livraisons.</p>
 
-    <div v-if="loading" class="ie-card ie-card-body" style="margin-top: 16px;">Chargement…</div>
+    <div v-if="loading" class="ie-skeleton" style="height: 360px; margin-top: 16px; border-radius: 14px;" aria-busy="true"></div>
     <EmptyState
       v-else-if="notFound" icon="fa-solid fa-truck-fast"
       text="Aucun profil transporteur n'est lié à votre compte. Contactez l'administration."

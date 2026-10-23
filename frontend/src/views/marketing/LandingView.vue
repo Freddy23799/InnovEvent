@@ -5,6 +5,7 @@ import logoMark from "../../assets/images/logo-mark.png";
 import InstallPwaButton from "../../components/InstallPwaButton.vue";
 import LandingChatbot from "../../components/LandingChatbot.vue";
 import api from "../../services/api";
+import { imageVariant, preloadImage } from "../../services/media";
 import { useLightboxStore } from "../../stores/lightbox";
 
 const lightbox = useLightboxStore();
@@ -186,19 +187,35 @@ const heroPhotos = ref([]);
 const heroIndex = ref(0);
 let heroTimer = null;
 
+// Chaque photo est une version allégée à la largeur de l'écran, téléchargée
+// et décodée AVANT d'être affichée : la suivante est préparée pendant que la
+// précédente est visible, donc aucune ne se dessine à l'écran.
+const heroReady = reactive({});
+
+function prepareHero(index) {
+  const photo = heroPhotos.value[index];
+  if (!photo || heroReady[photo]) return Promise.resolve(true);
+  return preloadImage(photo).then(() => (heroReady[photo] = true), () => false);
+}
+
 function startHeroRotation() {
   clearInterval(heroTimer);
   if (heroPhotos.value.length < 2) return;
-  heroTimer = setInterval(() => {
-    heroIndex.value = (heroIndex.value + 1) % heroPhotos.value.length;
+  prepareHero(1);
+  heroTimer = setInterval(async () => {
+    const next = (heroIndex.value + 1) % heroPhotos.value.length;
+    if (!(await prepareHero(next))) return;
+    heroIndex.value = next;
+    prepareHero((next + 1) % heroPhotos.value.length);
   }, HERO_INTERVAL_MS);
 }
 
 async function loadAll() {
   await Promise.all(["deco", "academy", "portfolio", "equipment", "packs"].map(loadSection));
   const pool = [...sections.portfolio, ...sections.deco].map((p) => p.photo).filter(Boolean);
-  heroPhotos.value = [...new Set(pool)].slice(0, 8);
+  heroPhotos.value = [...new Set(pool)].slice(0, 8).map((photo) => imageVariant(photo));
   heroIndex.value = 0;
+  await prepareHero(0);
   startHeroRotation();
 }
 
@@ -353,7 +370,7 @@ onUnmounted(() => {
         <div
           v-for="(photo, i) in heroPhotos" :key="photo"
           class="hero-ph" :class="{ 'is-active': i === heroIndex }"
-          :style="{ backgroundImage: `url(${photo})` }"
+          :style="heroReady[photo] ? { backgroundImage: `url(${photo})` } : {}"
         ></div>
         <div class="hero-scrim"></div>
       </div>
@@ -490,7 +507,7 @@ onUnmounted(() => {
             :class="{ 'is-clickable': sections.portfolio[0]?.photo }"
             @click="openLightbox(sections.portfolio[0])"
           >
-            <img v-if="sections.portfolio[0]?.photo" :src="sections.portfolio[0].photo" :alt="sections.portfolio[0].label" />
+            <img v-if="sections.portfolio[0]?.photo" v-img.eager="sections.portfolio[0].photo" :alt="sections.portfolio[0].label" />
             <div v-else class="poles-feature-photo-empty"><i class="fa-solid fa-calendar-week"></i></div>
           </div>
           <div class="poles-feature-text" data-reveal>
@@ -533,14 +550,14 @@ onUnmounted(() => {
 
         <div class="poles-grid" data-reveal-group>
           <div class="pole-card">
-            <div class="pole-card-photo" v-if="sections.deco[0]?.photo"><img :src="sections.deco[0].photo" :alt="sections.deco[0].label" /></div>
+            <div class="pole-card-photo" v-if="sections.deco[0]?.photo"><img v-img="sections.deco[0].photo" :alt="sections.deco[0].label" /></div>
             <div class="pole-card-icon" v-else><i class="fa-solid fa-palette"></i></div>
             <h4>Home &amp; Design</h4>
             <p>Décoration événementielle et aménagement d'espaces, du DJ au traiteur en passant par la scénographie.</p>
             <a href="#homedesign" class="text-link">Voir le pôle</a>
           </div>
           <div class="pole-card" id="academy-card">
-            <div class="pole-card-photo" v-if="sections.academy[0]?.photo"><img :src="sections.academy[0].photo" :alt="sections.academy[0].label" /></div>
+            <div class="pole-card-photo" v-if="sections.academy[0]?.photo"><img v-img="sections.academy[0].photo" :alt="sections.academy[0].label" /></div>
             <div class="pole-card-icon" v-else><i class="fa-solid fa-graduation-cap"></i></div>
             <h4>Academy</h4>
             <p>Formations en décoration, wedding planning et gestion événementielle, attestation à la clé.</p>
@@ -589,7 +606,7 @@ onUnmounted(() => {
           <template v-else-if="sections.equipment.length">
             <div v-for="item in sections.equipment" :key="item.id" class="equip-card">
               <div class="media-photo is-clickable" @click="openLightbox(item)">
-                <img v-if="item.photo" :src="item.photo" :alt="item.label" />
+                <img v-if="item.photo" v-img="item.photo" :alt="item.label" />
                 <i v-else class="fa-solid fa-sliders"></i>
                 <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
               </div>
@@ -642,7 +659,7 @@ onUnmounted(() => {
           <template v-else-if="sections.deco.length">
             <div v-for="item in sections.deco" :key="item.id" class="media-card is-clickable" role="button" tabindex="0" :aria-label="`Agrandir : ${item.label}`" @click="openLightbox(item)" @keydown.enter="openLightbox(item)" @keydown.space.prevent="openLightbox(item)">
               <div class="media-photo">
-                <img v-if="item.photo" :src="item.photo" :alt="item.label" />
+                <img v-if="item.photo" v-img="item.photo" :alt="item.label" />
                 <i v-else class="fa-solid fa-palette"></i>
                 <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-up-right-and-down-left-from-center"></i><span>Voir le projet</span></span>
               </div>
@@ -669,7 +686,7 @@ onUnmounted(() => {
           <template v-else-if="sections.academy.length">
             <div v-for="item in sections.academy" :key="item.id" class="academy-card">
               <div class="media-photo is-clickable" @click="openLightbox(item)">
-                <img v-if="item.photo" :src="item.photo" :alt="item.label" />
+                <img v-if="item.photo" v-img="item.photo" :alt="item.label" />
                 <i v-else class="fa-solid fa-graduation-cap"></i>
                 <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
               </div>
@@ -728,7 +745,7 @@ onUnmounted(() => {
           <template v-else-if="filteredPortfolio.length">
             <div v-for="item in filteredPortfolio" :key="item.id" class="gal-item is-clickable" @click="openLightbox(item)">
               <div class="media-photo">
-                <img v-if="item.photo" :src="item.photo" :alt="item.label" />
+                <img v-if="item.photo" v-img="item.photo" :alt="item.label" />
                 <i v-else class="fa-solid fa-images"></i>
                 <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
                 <span v-if="item.tier" class="gal-tier" :class="`is-${item.tier}`">{{ TIER_LABELS[item.tier] }}</span>
@@ -779,7 +796,7 @@ onUnmounted(() => {
           <template v-else-if="sections.packs.length">
             <div v-for="item in sections.packs" :key="item.id" class="pack-card">
               <div class="media-photo is-clickable" @click="openLightbox(item)">
-                <img v-if="item.photo" :src="item.photo" :alt="item.label" />
+                <img v-if="item.photo" v-img="item.photo" :alt="item.label" />
                 <i v-else class="fa-solid fa-box-open"></i>
                 <span v-if="item.photo" class="media-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i></span>
               </div>

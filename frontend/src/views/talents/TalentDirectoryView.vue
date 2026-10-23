@@ -65,11 +65,11 @@ onMounted(loadTalents);
       </select>
     </div>
 
-    <div v-if="loading" class="ie-card ie-card-body">Chargement des talents…</div>
+    <div v-if="loading" class="talent-grid" aria-busy="true"><div v-for="i in 6" :key="i" class="ie-skeleton ie-skeleton-card"></div></div>
     <div v-else-if="talents.length" class="talent-grid">
       <router-link v-for="talent in talents" :key="talent.id" :to="{ name: 'talent-detail', params: { id: talent.id } }" class="ie-card talent-card">
         <div class="talent-photo">
-          <img v-if="talent.photo" :src="talent.photo" :alt="talent.full_name" />
+          <img v-if="talent.photo" v-img="talent.photo" :alt="talent.full_name" />
           <i v-else class="fa-solid fa-user"></i>
         </div>
         <div class="talent-body">

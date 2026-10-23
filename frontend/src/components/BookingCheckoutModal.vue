@@ -5,6 +5,7 @@ import mtnLogo from "../assets/images/payment/mtn.svg";
 import orangeMoneyLogo from "../assets/images/payment/orange-money.svg";
 import visaLogo from "../assets/images/payment/visa.svg";
 import api from "../services/api";
+import { paymentErrorMessage, postPayment } from "../services/payments";
 
 const props = defineProps({
   booking: { type: Object, required: true },
@@ -79,11 +80,11 @@ async function confirmPayment() {
   try {
     const payload = { payment_provider: selectedPayment.value };
     if (appliedCoupon.value) payload.coupon_code = couponCode.value.trim();
-    const { data } = await api.post(`/bookings/${props.booking.id}/pay/`, payload);
+    const { data } = await postPayment(`booking:${props.booking.id}`, `/bookings/${props.booking.id}/pay/`, payload);
     success.value = true;
     setTimeout(() => emit("paid", data), 1200);
   } catch (e) {
-    errorMessage.value = e?.response?.data?.detail || "Le paiement a échoué. Réessayez ou choisissez un autre moyen de paiement.";
+    errorMessage.value = paymentErrorMessage(e);
   } finally {
     submitting.value = false;
   }

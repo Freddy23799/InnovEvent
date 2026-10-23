@@ -60,7 +60,7 @@ onMounted(loadTickets);
             <tr v-for="ticket in tickets" :key="ticket.id">
               <td>
                 <div class="ie-ticket-thumb">
-                  <img v-if="ticket.event_photo" :src="ticket.event_photo" :alt="ticket.event_title" class="ie-zoomable" @click="lightbox.open(ticket.event_photo, ticket.event_title)" />
+                  <img v-if="ticket.event_photo" v-img="ticket.event_photo" :alt="ticket.event_title" class="ie-zoomable" @click="lightbox.open(ticket.event_photo, ticket.event_title)" />
                   <i v-else class="fa-solid fa-ticket"></i>
                 </div>
               </td>

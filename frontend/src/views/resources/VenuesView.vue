@@ -409,7 +409,7 @@ onMounted(() => {
     <div v-else-if="venues.length" class="ie-catalog-grid">
       <div v-for="venue in venues" :key="venue.id" class="ie-card ie-catalog-card">
         <div class="ie-catalog-photo">
-          <img v-if="venue.photo" :src="venue.photo" :alt="venue.name" class="ie-zoomable" @click="lightbox.open(venue.photo, venue.name)" />
+          <img v-if="venue.photo" v-img="venue.photo" :alt="venue.name" class="ie-zoomable" @click="lightbox.open(venue.photo, venue.name)" />
           <i v-else class="fa-solid fa-building-columns"></i>
           <span class="ie-badge ie-catalog-availability" :class="venue.is_available ? 'ie-badge-success' : 'ie-badge-danger'">
             {{ venue.is_available ? "Disponible" : "Occupée actuellement" }}

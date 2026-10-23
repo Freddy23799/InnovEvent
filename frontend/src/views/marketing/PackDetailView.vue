@@ -217,7 +217,7 @@ onMounted(loadPack);
 
       <div class="ie-pack-hero">
         <div class="ie-pack-hero-photo" :class="{ 'is-empty': !pack.photo }">
-          <img v-if="pack.photo" :src="pack.photo" :alt="pack.label" class="ie-zoomable" @click="lightbox.open(pack.photo, pack.label)" />
+          <img v-if="pack.photo" v-img.eager="pack.photo" :alt="pack.label" class="ie-zoomable" @click="lightbox.open(pack.photo, pack.label)" />
           <i v-else class="fa-solid fa-box-open"></i>
         </div>
         <div class="ie-pack-hero-body">
@@ -276,7 +276,7 @@ onMounted(loadPack);
         <div v-if="includedItems.length" class="ie-pack-items-grid">
           <div v-for="item in includedItems" :key="item.id" class="ie-pack-item-card" :class="{ 'is-unavailable': !item.resource_is_active }">
             <div class="ie-pack-item-photo">
-              <img v-if="item.resource_photo" :src="item.resource_photo" :alt="item.resource_name" />
+              <img v-if="item.resource_photo" v-img="item.resource_photo" :alt="item.resource_name" />
               <i v-else :class="TYPE_ICONS[item.resource_type]"></i>
               <span class="ie-pack-item-type"><i :class="TYPE_ICONS[item.resource_type]"></i> {{ TYPE_LABELS[item.resource_type] }}</span>
             </div>
@@ -307,7 +307,7 @@ onMounted(loadPack);
         <div class="ie-pack-items-grid">
           <div v-for="item in optionalItems" :key="item.id" class="ie-pack-item-card" :class="{ 'is-unavailable': !item.resource_is_active }">
             <div class="ie-pack-item-photo">
-              <img v-if="item.resource_photo" :src="item.resource_photo" :alt="item.resource_name" />
+              <img v-if="item.resource_photo" v-img="item.resource_photo" :alt="item.resource_name" />
               <i v-else :class="TYPE_ICONS[item.resource_type]"></i>
               <span class="ie-pack-item-type"><i :class="TYPE_ICONS[item.resource_type]"></i> {{ TYPE_LABELS[item.resource_type] }}</span>
             </div>

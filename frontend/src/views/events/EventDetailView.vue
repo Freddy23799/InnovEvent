@@ -91,7 +91,7 @@ onMounted(loadEvent);
 <template>
   <div v-if="event">
     <div class="ie-event-banner ie-card" v-if="event.photo">
-      <img :src="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
+      <img v-img.eager="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
     </div>
 
     <div class="ie-page-header">

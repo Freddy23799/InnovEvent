@@ -72,7 +72,7 @@ onMounted(loadData);
     <h1><i class="fa-solid fa-id-card" style="color: var(--ie-red); margin-right: 8px;"></i>Mon profil chauffeur</h1>
     <p class="ie-page-subtitle">Vos coordonnées et documents (CNI, permis) utilisés par l'administration et votre transporteur.</p>
 
-    <div v-if="loading" class="ie-card ie-card-body" style="margin-top: 16px;">Chargement…</div>
+    <div v-if="loading" class="ie-skeleton" style="height: 360px; margin-top: 16px; border-radius: 14px;" aria-busy="true"></div>
     <EmptyState
       v-else-if="notFound" icon="fa-solid fa-id-card"
       text="Aucune fiche chauffeur n'est liée à votre compte. Contactez l'administration ou votre transporteur."

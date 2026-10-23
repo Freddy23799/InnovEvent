@@ -130,7 +130,7 @@ onMounted(loadDashboard);
       <div class="ie-card-body" v-else-if="upcomingTickets.length">
         <div v-for="ticket in upcomingTickets" :key="ticket.id" class="ie-upticket-row">
           <div class="ie-upticket-thumb">
-            <img v-if="ticket.event_photo" :src="ticket.event_photo" :alt="ticket.event_title" class="ie-zoomable" @click="lightbox.open(ticket.event_photo, ticket.event_title)" />
+            <img v-if="ticket.event_photo" v-img="ticket.event_photo" :alt="ticket.event_title" class="ie-zoomable" @click="lightbox.open(ticket.event_photo, ticket.event_title)" />
             <i v-else class="fa-solid fa-ticket"></i>
           </div>
           <div class="ie-upticket-info">
@@ -164,7 +164,7 @@ onMounted(loadDashboard);
         <div v-else-if="marketEvents.length" class="ie-catalog-grid">
           <div v-for="event in marketEvents" :key="event.id" class="ie-market-card">
             <div class="ie-market-photo">
-              <img v-if="event.photo" :src="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
+              <img v-if="event.photo" v-img="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
               <i v-else class="fa-solid fa-calendar-week"></i>
             </div>
             <div class="ie-market-body">

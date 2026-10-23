@@ -18,7 +18,11 @@ import logo from "../assets/images/logo-mark.png";
       </div>
     </header>
     <main class="ie-public-content">
-      <router-view />
+      <router-view v-slot="{ Component, route: current }">
+        <div :key="current.path" class="ie-page-enter">
+          <component :is="Component" />
+        </div>
+      </router-view>
     </main>
   </div>
 </template>

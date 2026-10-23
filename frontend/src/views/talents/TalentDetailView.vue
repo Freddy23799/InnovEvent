@@ -57,13 +57,13 @@ onMounted(loadTalent);
   <section class="talent-detail">
     <router-link :to="{ name: 'talents-directory' }" class="back-link"><i class="fa-solid fa-arrow-left"></i> Tous les talents</router-link>
 
-    <div v-if="loading" class="ie-card ie-card-body">Chargement du profil…</div>
+    <div v-if="loading" class="ie-skeleton" style="height: 320px; border-radius: 18px;" aria-busy="true"></div>
     <EmptyState v-else-if="notFound" icon="fa-solid fa-user-slash" text="Ce profil n'est plus visible." />
 
     <template v-else-if="talent">
       <header class="ie-card profile-head">
         <div class="avatar">
-          <img v-if="talent.photo" :src="talent.photo" :alt="talent.full_name" />
+          <img v-if="talent.photo" v-img.eager="talent.photo" :alt="talent.full_name" />
           <i v-else class="fa-solid fa-user"></i>
         </div>
         <div class="identity">
@@ -106,7 +106,7 @@ onMounted(loadTalent);
         <h2>Réalisations</h2>
         <div v-if="talent.portfolio_items.length" class="portfolio">
           <button v-for="item in talent.portfolio_items" :key="item.id" type="button" class="portfolio-item" @click="lightboxItem = item">
-            <img :src="item.image" :alt="item.caption || talent.full_name" />
+            <img v-img="item.image" :alt="item.caption || talent.full_name" />
             <span v-if="item.caption">{{ item.caption }}</span>
           </button>
         </div>
@@ -115,7 +115,7 @@ onMounted(loadTalent);
     </template>
 
     <div v-if="lightboxItem" class="lightbox" @click="lightboxItem = null">
-      <img :src="lightboxItem.image" :alt="lightboxItem.caption" />
+      <img v-img="lightboxItem.image" :alt="lightboxItem.caption" />
       <p v-if="lightboxItem.caption">{{ lightboxItem.caption }}</p>
     </div>
   </section>

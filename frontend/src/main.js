@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 import { createApp } from "vue";
 import App from "./App.vue";
 import "./assets/styles/design-system.css";
+import smartImage from "./directives/smartImage";
 import i18n from "./i18n";
 import router from "./router";
 import { useAuthStore } from "./stores/auth";
@@ -11,6 +12,7 @@ import { useToastStore } from "./stores/toast";
 const app = createApp(App);
 app.use(createPinia());
 app.use(i18n);
+app.directive("img", smartImage);
 
 // Filet de sécurité : de nombreux écrans chargent leurs données dans un
 // `try { … } finally { … }` sans `catch`. Sans gestionnaire global, un échec

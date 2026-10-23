@@ -465,7 +465,13 @@ onBeforeUnmount(() => {
         </div>
       </header>
       <main class="ie-content">
-        <router-view />
+        <!-- Clé par chemin : chaque écran entre en fondu, et un écran de détail
+             (/talents/1 → /talents/2) est bien rechargé. -->
+        <router-view v-slot="{ Component, route: current }">
+          <div :key="current.path" class="ie-page-enter">
+            <component :is="Component" />
+          </div>
+        </router-view>
       </main>
     </div>
   </div>

@@ -53,3 +53,23 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.transaction_ref} — {self.amount} {self.currency} ({self.get_status_display()})"
+
+
+class IdempotencyRecord(models.Model):
+    """Mémorise le résultat d'une demande de paiement identifiée par la clé
+    `Idempotency-Key` envoyée par le navigateur : un double clic, ou un
+    nouvel essai après une coupure réseau, renvoie le résultat du premier
+    paiement au lieu d'encaisser une seconde fois."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="idempotency_records")
+    key = models.CharField(max_length=64)
+    scope = models.CharField(max_length=200, help_text="Méthode et chemin de la requête d'origine")
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Vide tant que le paiement est en cours")
+    response = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user", "key"], name="unique_idempotency_key_per_user")]
+
+    def __str__(self):
+        return f"{self.user_id} — {self.key}"

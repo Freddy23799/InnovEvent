@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
 import api from "../../services/api";
+import { paymentErrorMessage, postPayment } from "../../services/payments";
 import { useAuthStore } from "../../stores/auth";
 import { useLightboxStore } from "../../stores/lightbox";
 
@@ -99,7 +100,7 @@ async function buyTicket(event) {
   }
   purchasing.value = event.id;
   try {
-    await api.post("/tickets/purchase/", {
+    await postPayment(`ticket:${form.ticketType}:${form.quantity}`, "/tickets/purchase/", {
       ticket_type: form.ticketType,
       quantity: form.quantity,
       payment_provider: form.paymentProvider,
@@ -114,7 +115,7 @@ async function buyTicket(event) {
     syncTicketSelection(event);
   } catch (e) {
     const d = e?.response?.data;
-    purchaseError[event.id] = d?.detail || d?.non_field_errors?.[0] || "L'achat a échoué.";
+    purchaseError[event.id] = paymentErrorMessage(e, "L'achat a échoué.");
     if ([400, 409].includes(e?.response?.status)) {
       try {
         const { data } = await api.get("/tickets/types/marketplace/", { params: { event: event.id } });
@@ -155,7 +156,7 @@ onMounted(loadEvents);
     <div v-else-if="events.length" class="ie-catalog-grid">
       <div v-for="event in events" :key="event.id" class="ie-card ie-market-card">
         <div class="ie-market-photo">
-          <img v-if="event.photo" :src="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
+          <img v-if="event.photo" v-img="event.photo" :alt="event.title" class="ie-zoomable" @click="lightbox.open(event.photo, event.title)" />
           <i v-else class="fa-solid fa-calendar-week"></i>
           <div class="ie-market-pills">
             <span v-for="tt in (ticketTypesByEvent[event.id] || []).slice(0, 2)" :key="tt.id" class="ie-market-pill-overlay">{{ tt.name }}</span>

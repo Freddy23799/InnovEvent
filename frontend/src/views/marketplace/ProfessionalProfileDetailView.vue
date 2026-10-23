@@ -258,11 +258,11 @@ onMounted(async () => {
     <template v-else-if="profile">
       <div class="ie-pro-detail-cover" :class="{ 'has-photo': profile.cover_photo }">
         <div class="ie-pro-detail-cover-img">
-          <img v-if="profile.cover_photo" :src="profile.cover_photo" :alt="profile.business_name" />
+          <img v-if="profile.cover_photo" v-img.eager="profile.cover_photo" :alt="profile.business_name" />
         </div>
         <div class="ie-pro-detail-header">
           <div class="ie-pro-detail-logo">
-            <img v-if="profile.logo" :src="profile.logo" :alt="profile.business_name" />
+            <img v-if="profile.logo" v-img.eager="profile.logo" :alt="profile.business_name" />
             <i v-else class="fa-solid fa-handshake"></i>
           </div>
           <div>
@@ -320,7 +320,7 @@ onMounted(async () => {
               <div v-if="profile.services.length" class="ie-service-list">
                 <div v-for="s in profile.services" :key="s.id" class="ie-service-row">
                   <div class="ie-service-photo">
-                    <img v-if="s.photo" :src="s.photo" :alt="s.name" />
+                    <img v-if="s.photo" v-img="s.photo" :alt="s.name" />
                     <i v-else class="fa-solid fa-concierge-bell"></i>
                   </div>
                   <div class="ie-service-info">
@@ -380,12 +380,12 @@ onMounted(async () => {
             <div class="ie-portfolio-grid">
               <div v-for="p in profile.portfolio_items" :key="p.id" class="ie-portfolio-item">
                 <div v-if="p.before_image" class="ie-portfolio-before-after">
-                  <img :src="p.before_image" alt="Avant" />
-                  <img :src="p.image" :alt="p.caption" />
+                  <img v-img="p.before_image" alt="Avant" />
+                  <img v-img="p.image" :alt="p.caption" />
                   <span class="ie-badge ie-badge-neutral ie-portfolio-ba-label ie-portfolio-ba-before">Avant</span>
                   <span class="ie-badge ie-badge-neutral ie-portfolio-ba-label ie-portfolio-ba-after">Après</span>
                 </div>
-                <img v-else :src="p.image" :alt="p.caption" />
+                <img v-else v-img="p.image" :alt="p.caption" />
                 <span v-if="p.caption" class="ie-portfolio-caption">{{ p.caption }}</span>
               </div>
             </div>
