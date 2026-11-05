@@ -7,6 +7,7 @@ from .models import (
     CommissionSettings,
     MarketplaceFeature,
     MarketplaceListing,
+    MarketplaceListingPhoto,
     MarketplaceOrder,
     MarketplaceSubscription,
     MarketplaceType,
@@ -20,23 +21,56 @@ from .models import (
     Quote,
     QuoteLineItem,
     RequestedEquipmentItem,
+    SaleOrder,
+    SaleOrderItem,
     SubscriptionPlan,
     SubscriptionTier,
 )
+
+
+class MarketplaceListingPhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketplaceListingPhoto
+        fields = ["id", "listing", "image", "order", "created_at"]
+        read_only_fields = ["id", "created_at"]
 
 
 class MarketplaceListingSerializer(serializers.ModelSerializer):
     provider_name = serializers.CharField(source="provider.name", read_only=True, default=None)
     created_by_name = serializers.SerializerMethodField()
     is_owner = serializers.SerializerMethodField()
+    category_display = serializers.CharField(source="get_category_display", read_only=True)
+    photos = MarketplaceListingPhotoSerializer(many=True, read_only=True)
+    equipment_name = serializers.CharField(source="equipment.name", read_only=True, default=None)
+    available_stock = serializers.SerializerMethodField()
+    rental_price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = MarketplaceListing
         fields = [
             "id", "marketplace_type", "provider", "provider_name", "created_by", "created_by_name", "is_owner",
-            "title", "description", "price", "currency", "photo", "is_active", "requires_subscription",
-            "order", "created_at", "updated_at",
+            "title", "description", "price", "currency", "photo", "photos", "category", "category_display", "subcategory", "stock",
+            "is_for_sale", "is_for_rent", "rental_price_per_day", "rental_price", "equipment", "equipment_name", "available_stock",
+            "is_active", "requires_subscription", "order", "created_at", "updated_at",
         ]
+
+    def get_available_stock(self, obj):
+        """Pièces disponibles aujourd'hui (stock possédé moins locations en
+        cours ou à venir) ; `None` = stock non suivi."""
+        if obj.marketplace_type != MarketplaceType.SALE:
+            return obj.stock
+        from .shop import available_for_sale
+
+        return available_for_sale(obj)
+
+    def validate(self, attrs):
+        def value(field):
+            return attrs[field] if field in attrs else getattr(self.instance, field, None)
+
+        if value("marketplace_type") == MarketplaceType.SALE:
+            if not value("is_for_sale") and not value("is_for_rent"):
+                raise serializers.ValidationError({"is_for_sale": "Un produit doit être proposé à l'achat, à la location, ou les deux."})
+        return attrs
         read_only_fields = ["id", "created_by", "created_at", "updated_at"]
 
     def get_created_by_name(self, obj):
@@ -62,6 +96,111 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
 
     def get_total_amount(self, obj):
         return obj.listing.price * obj.quantity
+
+
+class SaleOrderItemSerializer(serializers.ModelSerializer):
+    photo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SaleOrderItem
+        fields = ["id", "listing", "title", "unit_price", "quantity", "days", "line_total", "damaged_quantity", "lost_quantity", "photo"]
+
+    def get_photo(self, obj):
+        if not (obj.listing_id and obj.listing.photo):
+            return None
+        request = self.context.get("request")
+        url = obj.listing.photo.url
+        return request.build_absolute_uri(url) if request else url
+
+
+class SaleOrderSerializer(serializers.ModelSerializer):
+    items = SaleOrderItemSerializer(many=True, read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    buyer_name = serializers.SerializerMethodField()
+    buyer_email = serializers.EmailField(source="buyer.email", read_only=True)
+    order_type_display = serializers.CharField(source="get_order_type_display", read_only=True)
+    rental_status_display = serializers.CharField(source="get_rental_status_display", read_only=True)
+
+    class Meta:
+        model = SaleOrder
+        fields = [
+            "id", "number", "buyer", "buyer_name", "buyer_email", "status", "status_display", "currency", "total",
+            "order_type", "order_type_display", "rental_start", "rental_end", "rental_days",
+            "rental_status", "rental_status_display", "out_at", "returned_at", "return_notes",
+            "delivery_name", "delivery_phone", "delivery_city", "delivery_address", "notes",
+            "items", "paid_at", "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_buyer_name(self, obj):
+        return obj.buyer.get_full_name() or obj.buyer.username
+
+
+class SaleOrderLineInputSerializer(serializers.Serializer):
+    listing = serializers.PrimaryKeyRelatedField(
+        queryset=MarketplaceListing.objects.filter(is_active=True, marketplace_type=MarketplaceType.SALE)
+    )
+    quantity = serializers.IntegerField(min_value=1, max_value=10000)
+
+
+class SaleCartSerializer(serializers.Serializer):
+    """Panier + mode (achat ou location sur une période, dates incluses)."""
+
+    MAX_RENTAL_DAYS = 365
+
+    items = SaleOrderLineInputSerializer(many=True)
+    order_type = serializers.ChoiceField(choices=SaleOrder.OrderType.choices, default=SaleOrder.OrderType.PURCHASE)
+    rental_start = serializers.DateField(required=False, allow_null=True)
+    rental_end = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs["order_type"] == SaleOrder.OrderType.RENTAL:
+            start, end = attrs.get("rental_start"), attrs.get("rental_end")
+            if not start or not end:
+                raise serializers.ValidationError({"rental_start": "Choisissez les dates de début et de fin de la location."})
+            from django.utils import timezone
+
+            if start < timezone.localdate():
+                raise serializers.ValidationError({"rental_start": "La location ne peut pas commencer dans le passé."})
+            if end < start:
+                raise serializers.ValidationError({"rental_end": "La date de fin doit suivre la date de début."})
+            if (end - start).days + 1 > self.MAX_RENTAL_DAYS:
+                raise serializers.ValidationError({"rental_end": "Une location ne peut pas dépasser un an."})
+            refused = [line["listing"].title for line in attrs["items"] if not line["listing"].is_for_rent]
+        else:
+            attrs["rental_start"] = attrs["rental_end"] = None
+            refused = [line["listing"].title for line in attrs["items"] if not line["listing"].is_for_sale]
+        if refused:
+            mode = "à la location" if attrs["order_type"] == SaleOrder.OrderType.RENTAL else "à l'achat"
+            raise serializers.ValidationError({"items": [f"Non proposé {mode} : " + ", ".join(refused) + "."]})
+        return attrs
+
+    def validate_items(self, items):
+        if not items:
+            raise serializers.ValidationError("Votre panier est vide.")
+        ids = [line["listing"].pk for line in items]
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError("Un même produit apparaît plusieurs fois dans le panier.")
+        if len({line["listing"].currency for line in items}) > 1:
+            raise serializers.ValidationError("Les produits d'une même commande doivent avoir la même devise.")
+        return items
+
+
+class SaleOrderCreateSerializer(SaleCartSerializer):
+    """Seuls les produits, quantités, mode et dates viennent du client : prix,
+    total et devise sont recalculés côté serveur."""
+
+    delivery_name = serializers.CharField(max_length=150)
+    delivery_phone = serializers.CharField(max_length=30)
+    delivery_city = serializers.CharField(max_length=100)
+    delivery_address = serializers.CharField()
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class RentalReturnLineSerializer(serializers.Serializer):
+    item = serializers.IntegerField()
+    damaged_quantity = serializers.IntegerField(min_value=0, default=0)
+    lost_quantity = serializers.IntegerField(min_value=0, default=0)
 
 
 class MarketplaceOrderPaymentSerializer(serializers.Serializer):
@@ -224,6 +363,7 @@ class ProfessionalProfileListSerializer(serializers.ModelSerializer):
     distance_km = serializers.SerializerMethodField()
 
     verification_status_display = serializers.CharField(source="get_verification_status_display", read_only=True)
+    has_id_card = serializers.SerializerMethodField()
 
     class Meta:
         model = ProfessionalProfile
@@ -231,7 +371,7 @@ class ProfessionalProfileListSerializer(serializers.ModelSerializer):
             "id", "marketplace_type", "marketplace_label", "category", "category_display",
             "business_name", "city", "neighborhood", "service_area", "client_type", "client_type_display", "price_range",
             "logo", "cover_photo", "is_verified", "verification_status", "verification_status_display",
-            "is_recommended", "is_top",
+            "verification_requested_at", "has_id_card", "is_recommended", "is_top",
             "average_rating", "review_count", "service_count", "starting_price", "is_owner", "is_favorited", "distance_km",
         ]
 
@@ -241,6 +381,9 @@ class ProfessionalProfileListSerializer(serializers.ModelSerializer):
 
     def get_review_count(self, obj):
         return obj.review_count()
+
+    def get_has_id_card(self, obj):
+        return bool(obj.id_card_photo)
 
     def get_distance_km(self, obj):
         value = getattr(obj, "distance_km", None)

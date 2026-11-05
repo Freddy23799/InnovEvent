@@ -55,3 +55,19 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.title} -> {self.recipient}"
+
+
+class PushSubscription(models.Model):
+    """Abonnement Web Push d'un navigateur ou d'une PWA (un par appareil) :
+    permet de notifier l'utilisateur même application fermée."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="push_subscriptions")
+    endpoint = models.URLField(max_length=600, unique=True)
+    p256dh = models.CharField(max_length=200)
+    auth = models.CharField(max_length=100)
+    user_agent = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_success_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Push {self.user} ({self.endpoint[:40]}…)"

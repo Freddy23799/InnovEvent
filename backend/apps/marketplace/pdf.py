@@ -57,7 +57,7 @@ def _draw_info_grid(pdf, x, y, width, pairs, row_height=11 * mm):
     return y - rows * row_height
 
 
-def _draw_items_table(pdf, x, y, width, items, currency):
+def _draw_items_table(pdf, x, y, width, items, currency, header_label="PRESTATION"):
     col_label = width - 70 * mm
     header_height = 9 * mm
     row_height = 8 * mm
@@ -66,7 +66,7 @@ def _draw_items_table(pdf, x, y, width, items, currency):
     pdf.rect(x, y - header_height, width, header_height, fill=True, stroke=False)
     pdf.setFillColor(HexColor("#FFFFFF"))
     pdf.setFont("Helvetica-Bold", 8.5)
-    pdf.drawString(x + 4 * mm, y - header_height + 3.2 * mm, "PRESTATION")
+    pdf.drawString(x + 4 * mm, y - header_height + 3.2 * mm, header_label)
     pdf.drawCentredString(x + col_label + 15 * mm, y - header_height + 3.2 * mm, "QTÉ")
     pdf.drawRightString(x + col_label + 42 * mm, y - header_height + 3.2 * mm, "PRIX UNIT.")
     pdf.drawRightString(x + width - 4 * mm, y - header_height + 3.2 * mm, "TOTAL")
@@ -83,7 +83,7 @@ def _draw_items_table(pdf, x, y, width, items, currency):
         pdf.setFillColor(MUTED_COLOR)
         pdf.setFont("Helvetica", 8)
         pdf.drawCentredString(x + col_label + 15 * mm, row_top - row_height + 2.8 * mm, str(item.quantity))
-        pdf.drawRightString(x + col_label + 42 * mm, row_top - row_height + 2.8 * mm, _fmt(item.unit_price, currency))
+        pdf.drawRightString(x + col_label + 42 * mm, row_top - row_height + 2.8 * mm, _fmt(getattr(item, "pdf_unit_price", item.unit_price), currency))
         pdf.setFillColor(TEXT_COLOR)
         pdf.setFont("Helvetica-Bold", 8.5)
         pdf.drawRightString(x + width - 4 * mm, row_top - row_height + 2.8 * mm, _fmt(item.line_total, currency))
@@ -247,6 +247,84 @@ def build_quote_pdf(quote) -> bytes:
     pdf.drawString(18 * mm + qr_size + 5 * mm, qr_y + qr_size - 13.5 * mm, "l'authenticité de ce devis.")
 
     draw_footer(pdf, width, "Ce devis est émis via la plateforme InnovEvent — aucun paiement ne doit être effectué hors plateforme.")
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
+INVOICE_ROWS_PER_PAGE = 18
+INVOICE_FOOTER = "Facture émise via la plateforme InnovEvent — règlement à effectuer auprès d'InnovEvent ou à la livraison."
+
+
+def build_sale_invoice_pdf(order) -> bytes:
+    """Facture d'une commande de la boutique (Marketplace vente)."""
+    width, height = A4
+    buffer, pdf = new_canvas(A4)
+    table_width = width - 36 * mm
+    title = "Facture — Boutique InnovEvent"
+
+    draw_header(pdf, width, title=title, subtitle=f"Facture n° {order.number}")
+
+    pdf.setFillColor(INNOVEVENT_NAVY)
+    pdf.setFont("Helvetica-Bold", 15)
+    pdf.drawString(18 * mm, height - 44 * mm, order.delivery_name)
+    pdf.setFillColor(MUTED_COLOR)
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(18 * mm, height - 49.5 * mm, f"{order.delivery_phone} · {order.buyer.email or order.buyer.username}")
+
+    draw_status_badge(
+        pdf, width - 50 * mm, height - 48 * mm, order.get_status_display(),
+        active=order.status != order.Status.CANCELLED,
+    )
+
+    info_pairs = [
+        ("Facture n°", order.number),
+        ("Date", order.created_at.strftime("%d/%m/%Y")),
+        ("Type", order.get_order_type_display()),
+        ("Ville de livraison", order.delivery_city),
+    ]
+    if order.order_type == order.OrderType.RENTAL:
+        info_pairs.append((
+            "Période de location",
+            f"Du {order.rental_start:%d/%m/%Y} au {order.rental_end:%d/%m/%Y} ({order.rental_days} j)",
+        ))
+    info_pairs.append(("Paiement", order.paid_at.strftime("Payée le %d/%m/%Y") if order.paid_at else "À payer / à la livraison"))
+    info_bottom = _draw_info_grid(pdf, 18 * mm, height - 58 * mm, table_width, info_pairs)
+    address_title = "Lieu de l'événement / livraison" if order.order_type == order.OrderType.RENTAL else "Adresse de livraison"
+    cursor_y = _draw_text_box(pdf, 18 * mm, info_bottom - 5 * mm, table_width, address_title, order.delivery_address)
+
+    pdf.setFillColor(INNOVEVENT_NAVY)
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(18 * mm, cursor_y - 8 * mm, "DÉTAIL DE LA COMMANDE")
+
+    items = list(order.items.all())
+    chunks = [items[i:i + INVOICE_ROWS_PER_PAGE] for i in range(0, len(items), INVOICE_ROWS_PER_PAGE)] or [[]]
+    items_top = cursor_y - 12 * mm
+    for index, chunk in enumerate(chunks):
+        if index:
+            draw_footer(pdf, width, INVOICE_FOOTER)
+            pdf.showPage()
+            draw_header(pdf, width, title=title, subtitle=f"Facture n° {order.number} (suite)")
+            items_top = height - 44 * mm
+        items_bottom = _draw_items_table(pdf, 18 * mm, items_top, table_width, chunk, order.currency, header_label="PRODUIT")
+
+    if items_bottom < 70 * mm:
+        draw_footer(pdf, width, INVOICE_FOOTER)
+        pdf.showPage()
+        draw_header(pdf, width, title=title, subtitle=f"Facture n° {order.number} (suite)")
+        items_bottom = height - 40 * mm
+
+    pieces = sum(item.quantity for item in items)
+    band_bottom = _draw_totals_box(
+        pdf, 18 * mm, items_bottom - 6 * mm, table_width,
+        [(f"Sous-total ({pieces} pièce{'s' if pieces > 1 else ''})", order.total)],
+        "TOTAL À PAYER" if order.status == order.Status.PENDING_PAYMENT else "MONTANT TOTAL",
+        order.total, order.currency,
+    )
+    if order.notes and band_bottom > 50 * mm:
+        _draw_text_box(pdf, 18 * mm, band_bottom - 8 * mm, table_width, "Note du client", order.notes)
+
+    draw_footer(pdf, width, INVOICE_FOOTER)
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()

@@ -271,6 +271,13 @@ if DEBUG and not EMAIL_HOST_PASSWORD:
 # Toute la plateforme utilise les paiements simulés par défaut, y compris hors
 # DEBUG, pour faciliter les essais. Le retour aux passerelles sera explicite.
 PAYMENTS_DEMO_MODE = os.environ.get("PAYMENTS_DEMO_MODE", "True") == "True"
+
+# Notifications Web Push (VAPID) : clés générées avec
+# `python manage.py generate_vapid_keys`. Sans clés, seules les notifications
+# temps réel dans l'application ouverte (WebSocket) restent actives.
+WEBPUSH_VAPID_PUBLIC_KEY = os.environ.get("WEBPUSH_VAPID_PUBLIC_KEY", "")
+WEBPUSH_VAPID_PRIVATE_KEY = os.environ.get("WEBPUSH_VAPID_PRIVATE_KEY", "")
+WEBPUSH_VAPID_SUBJECT = os.environ.get("WEBPUSH_VAPID_SUBJECT", "mailto:contact@innovevent.cm")
 # Secret partagé attendu sur chaque webhook entrant (en-tête X-Webhook-Secret) —
 # faute d'un identifiant marchand réel par fournisseur pour l'instant, c'est le
 # seul moyen de s'assurer qu'un appel provient bien du serveur de paiement et

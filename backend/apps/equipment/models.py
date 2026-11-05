@@ -91,6 +91,7 @@ class StockMovement(models.Model):
         DAMAGE = "damage", "Endommagé"
         LOSS = "loss", "Perdu / volé"
         RETURN = "return", "Retour en stock"
+        SALE = "sale", "Vente boutique"
         DISPOSAL = "disposal", "Mise au rebut"
         OTHER = "other", "Autre"
 

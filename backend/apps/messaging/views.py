@@ -15,6 +15,7 @@ from apps.notifications.services import notify_new_message
 
 from .crypto import decrypt_bytes
 from .autoresponder import answer_support_message
+from .services import get_support_conversation
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
 
@@ -43,24 +44,9 @@ class ConversationViewSet(viewsets.ModelViewSet):
         administrateur, afin que tout client/participant/employé puisse joindre
         l'administration directement depuis la plateforme sans connaître son
         identifiant (la liste des comptes est réservée aux administrateurs)."""
-        admin = User.objects.filter(role="admin", is_active=True).exclude(pk=request.user.pk).first()
-        if not admin:
+        conversation, _admin = get_support_conversation(request.user)
+        if conversation is None:
             return Response({"detail": "Aucun administrateur disponible pour le moment."}, status=status.HTTP_404_NOT_FOUND)
-
-        conversation = Conversation.get_or_create_between(request.user, admin)
-        if not conversation.is_admin_support:
-            conversation.is_admin_support = True
-            # Une conversation déjà reprise par un humain reste en suivi humain.
-            conversation.human_handoff = conversation.messages.filter(sender=admin, is_automated=False).exists()
-            conversation.save(update_fields=["is_admin_support", "human_handoff"])
-        if not conversation.messages.exists():
-            welcome = Message(conversation=conversation, sender=admin, is_automated=True, is_read=True)
-            welcome.body = (
-                f"Bonjour {request.user.first_name or request.user.username} ! Je suis l'assistant InnovEvent. "
-                "Posez votre question sur une salle, une réservation, un devis, un paiement ou nos services. "
-                "Je répondrai si possible; sinon l'administration prendra le relais dans cette conversation."
-            )
-            welcome.save()
         serializer = self.get_serializer(conversation)
         return Response(serializer.data)
 
@@ -135,18 +121,20 @@ class MessageViewSet(viewsets.ModelViewSet):
         if not conversation.participants.filter(pk=self.request.user.pk).exists():
             raise PermissionDenied("Vous ne participez pas à cette conversation.")
         message = serializer.save(sender=self.request.user)
-        notify_new_message(message)
 
         if not conversation.is_admin_support:
+            notify_new_message(message)
             return
 
         if self.request.user.is_admin_role:
+            notify_new_message(message)
             if not conversation.human_handoff:
                 conversation.human_handoff = True
                 conversation.save(update_fields=["human_handoff"])
             return
 
         if conversation.human_handoff:
+            notify_new_message(message)
             return
 
         admin = conversation.participants.filter(role="admin", is_active=True).first()
@@ -158,10 +146,13 @@ class MessageViewSet(viewsets.ModelViewSet):
             ("assistant" if prior.is_automated or prior.sender.is_admin_role else "user", prior.body)
             for prior in reversed(list(prior_messages[:24]))
         ]
-        reply, handoff = answer_support_message(message.body, history=history)
+        reply, handoff = answer_support_message(message.body, history=history, role=self.request.user.role)
         if handoff:
             conversation.human_handoff = True
             conversation.save(update_fields=["human_handoff"])
+            # L'assistant passe la main : l'administration est prévenue. Tant
+            # qu'il répond seul, elle n'est pas dérangée à chaque message.
+            notify_new_message(message)
 
         automated_message = Message(
             conversation=conversation,

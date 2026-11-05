@@ -1,7 +1,8 @@
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
 import SkeletonTable from "../../components/SkeletonTable.vue";
+import { SALE_CATEGORIES } from "../../data/saleCategories";
 import api from "../../services/api";
 import { useToastStore } from "../../stores/toast";
 
@@ -14,18 +15,27 @@ const MARKETPLACE_TYPES = [
 
 const listings = ref([]);
 const providers = ref([]);
+const inventory = ref([]);
 const loading = ref(true);
 const showForm = ref(false);
 const submitting = ref(false);
 const errorMessage = ref("");
 const editingId = ref(null);
 const photoFile = ref(null);
+// Boutique : photos supplémentaires (galerie de la fiche produit).
+const extraPhotos = ref([]);
+const extraPhotoFiles = ref([]);
 
 const emptyForm = {
   marketplace_type: "sale", provider: "", title: "", description: "",
   price: 0, currency: "XAF", is_active: true, requires_subscription: false, order: 0,
+  category: "", subcategory: "", stock: null,
+  is_for_sale: true, is_for_rent: true, rental_price_per_day: null, equipment: "",
 };
 const form = reactive({ ...emptyForm });
+// Même règle que le serveur : 10 % du prix d'achat, arrondi à 50 FCFA.
+const autoRentalPrice = computed(() => Math.max(Math.round((Number(form.price) || 0) * 0.1 / 50) * 50, 50));
+const subcategoryOptions = computed(() => SALE_CATEGORIES.find((c) => c.value === form.category)?.subcategories || []);
 
 // Par défaut, la Marketplace vente est en accès libre (mode client simple) ; les
 // deux autres nécessitent un abonnement — l'administrateur peut toujours changer
@@ -37,12 +47,14 @@ function onTypeChange() {
 async function loadData() {
   loading.value = true;
   try {
-    const [listingsRes, providersRes] = await Promise.all([
+    const [listingsRes, providersRes, inventoryRes] = await Promise.all([
       api.get("/marketplace/listings/"),
       api.get("/providers/"),
+      api.get("/equipment/").catch(() => ({ data: [] })),
     ]);
     listings.value = listingsRes.data.results || listingsRes.data;
     providers.value = providersRes.data.results || providersRes.data;
+    inventory.value = inventoryRes.data.results || inventoryRes.data;
   } finally {
     loading.value = false;
   }
@@ -56,14 +68,18 @@ function startCreate() {
   Object.assign(form, emptyForm);
   editingId.value = null;
   photoFile.value = null;
+  extraPhotos.value = [];
+  extraPhotoFiles.value = [];
   errorMessage.value = "";
   showForm.value = true;
 }
 
 function startEdit(listing) {
-  Object.assign(form, { ...listing, provider: listing.provider || "" });
+  Object.assign(form, { ...listing, provider: listing.provider || "", category: listing.category || "", subcategory: listing.subcategory || "", equipment: listing.equipment || "" });
   editingId.value = listing.id;
   photoFile.value = null;
+  extraPhotos.value = [...(listing.photos || [])];
+  extraPhotoFiles.value = [];
   errorMessage.value = "";
   showForm.value = true;
 }
@@ -73,7 +89,13 @@ function onPhotoChange(e) {
 }
 
 function buildPayload() {
-  const base = { ...form, provider: form.provider || null };
+  // Champs calculés renvoyés par l'API : jamais renvoyés au serveur.
+  const { photos, photo, category_display, provider_name, created_by_name, is_owner, equipment_name, available_stock, ...fields } = form;
+  const base = {
+    ...fields, provider: form.provider || null, stock: form.stock === "" ? null : form.stock,
+    equipment: form.equipment || null,
+    rental_price_per_day: form.is_for_rent && form.rental_price_per_day !== "" ? form.rental_price_per_day : null,
+  };
   if (!photoFile.value) return base;
   const payload = new FormData();
   Object.entries(base).forEach(([key, value]) => {
@@ -89,10 +111,19 @@ async function submitForm() {
   submitting.value = true;
   try {
     const payload = buildPayload();
+    let listingId = editingId.value;
     if (editingId.value) {
       await api.patch(`/marketplace/listings/${editingId.value}/`, payload);
     } else {
-      await api.post("/marketplace/listings/", payload);
+      const { data } = await api.post("/marketplace/listings/", payload);
+      listingId = data.id;
+    }
+    for (const [index, file] of extraPhotoFiles.value.entries()) {
+      const photoPayload = new FormData();
+      photoPayload.append("listing", listingId);
+      photoPayload.append("image", file);
+      photoPayload.append("order", extraPhotos.value.length + index);
+      await api.post("/marketplace/listing-photos/", photoPayload);
     }
     showForm.value = false;
     toast.success(editingId.value ? "Modifications enregistrées." : "Annonce enregistrée.");
@@ -102,6 +133,16 @@ async function submitForm() {
   } finally {
     submitting.value = false;
   }
+}
+
+function onExtraPhotosChange(e) {
+  extraPhotoFiles.value = Array.from(e.target.files || []);
+}
+
+async function removeExtraPhoto(photo) {
+  await api.delete(`/marketplace/listing-photos/${photo.id}/`);
+  extraPhotos.value = extraPhotos.value.filter((p) => p.id !== photo.id);
+  await loadData();
 }
 
 async function toggleActive(listing) {
@@ -165,12 +206,66 @@ onMounted(loadData);
             </select>
           </div>
         </div>
-        <label class="ie-label" style="margin-top: 14px;">Photo</label>
+        <div v-if="form.marketplace_type === 'sale'" class="ie-form-row" style="margin-top: 14px;">
+          <div>
+            <label class="ie-label">Rayon de la boutique</label>
+            <select v-model="form.category" class="ie-select" @change="form.subcategory = ''">
+              <option value="">— Choisir —</option>
+              <option v-for="c in SALE_CATEGORIES" :key="c.value" :value="c.value">{{ c.label }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="ie-label">Catégorie</label>
+            <select v-model="form.subcategory" class="ie-select" :disabled="!subcategoryOptions.length">
+              <option value="">— {{ subcategoryOptions.length ? "Choisir" : "Aucune" }} —</option>
+              <option v-for="sc in subcategoryOptions" :key="sc.value" :value="sc.value">{{ sc.label }}</option>
+            </select>
+          </div>
+        </div>
+        <div v-if="form.marketplace_type === 'sale'" class="ie-offer-box">
+          <strong>Achat et location</strong>
+          <div class="ie-form-row" style="margin-top: 10px;">
+            <label class="ie-offer-check"><input v-model="form.is_for_sale" type="checkbox" /> Proposé à l'achat (au prix ci-dessus)</label>
+            <label class="ie-offer-check"><input v-model="form.is_for_rent" type="checkbox" /> Proposé à la location</label>
+          </div>
+          <div v-if="form.is_for_rent" style="margin-top: 10px; max-width: 280px;">
+            <label class="ie-label">Prix de location par jour et par pièce (facultatif)</label>
+            <input v-model.number="form.rental_price_per_day" type="number" min="0" class="ie-input" :placeholder="`Auto : ${autoRentalPrice.toLocaleString('fr-FR')} FCFA`" />
+            <p class="ie-field-hint">Vide = 10 % du prix d'achat par jour, calculé automatiquement.</p>
+          </div>
+          <div class="ie-form-row" style="margin-top: 12px;">
+            <div>
+              <label class="ie-label">Article d'inventaire lié (recommandé)</label>
+              <select v-model="form.equipment" class="ie-select">
+                <option value="">— Aucun : stock géré ici —</option>
+                <option v-for="e in inventory" :key="e.id" :value="e.id">{{ e.name }} ({{ e.quantity_total }} en stock)</option>
+              </select>
+              <p class="ie-field-hint">Le stock suit alors la gestion de stock : ventes, casse et pertes y sont enregistrées automatiquement.</p>
+            </div>
+            <div v-if="!form.equipment">
+              <label class="ie-label">Nombre de pièces en stock</label>
+              <input v-model.number="form.stock" type="number" min="0" class="ie-input" placeholder="Vide = stock non suivi" />
+              <p class="ie-field-hint">Diminue à chaque vente ; réservé pendant les locations.</p>
+            </div>
+          </div>
+        </div>
+        <label class="ie-label" style="margin-top: 14px;">{{ form.marketplace_type === 'sale' ? "Photo principale" : "Photo" }}</label>
         <input type="file" accept="image/*" class="ie-input" @change="onPhotoChange" />
+        <template v-if="form.marketplace_type === 'sale'">
+          <label class="ie-label" style="margin-top: 14px;">Photos supplémentaires (galerie du produit)</label>
+          <div v-if="extraPhotos.length" class="ie-extra-photos">
+            <div v-for="p in extraPhotos" :key="p.id" class="ie-extra-photo">
+              <img v-img="p.image" alt="" />
+              <button type="button" aria-label="Supprimer cette photo" @click="removeExtraPhoto(p)"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+          </div>
+          <input type="file" accept="image/*" multiple class="ie-input" @change="onExtraPhotosChange" />
+          <p class="ie-field-hint">Plusieurs photos possibles — ajoutées à l'enregistrement.</p>
+        </template>
         <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:14px;">
           <input v-model="form.is_active" type="checkbox" /> Annonce visible (décocher pour masquer sans supprimer)
         </label>
-        <div class="ie-discount-fieldset">
+        <div v-if="form.marketplace_type !== 'sale'" class="ie-discount-fieldset">
           <label style="display:flex; align-items:center; gap:8px; font-size:14px;">
             <input v-model="form.requires_subscription" type="checkbox" />
             Réservée aux comptes abonnés à ce marketplace
@@ -203,8 +298,10 @@ onMounted(loadData);
               <td>{{ listing.provider_name || listing.created_by_name || "—" }}</td>
               <td class="ie-num">{{ Number(listing.price).toLocaleString('fr-FR') }} {{ listing.currency }}</td>
               <td>
-                <span class="ie-badge" :class="listing.requires_subscription ? 'ie-badge-neutral' : 'ie-badge-success'">
-                  {{ listing.requires_subscription ? "Abonnement requis" : "Libre" }}
+                <span class="ie-badge" :class="listing.requires_subscription && listing.marketplace_type !== 'sale' ? 'ie-badge-neutral' : 'ie-badge-success'">
+                  {{ listing.marketplace_type === 'sale'
+                    ? [listing.is_for_sale ? "Achat" : "", listing.is_for_rent ? "Location" : ""].filter(Boolean).join(" + ") + (listing.available_stock !== null ? ` · ${listing.available_stock} dispo.` : "")
+                    : listing.requires_subscription ? "Abonnement requis" : "Libre" }}
                 </span>
               </td>
               <td>
@@ -227,3 +324,14 @@ onMounted(loadData);
     </div>
   </div>
 </template>
+
+<style scoped>
+.ie-extra-photos { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ie-extra-photo { position: relative; width: 72px; height: 72px; overflow: hidden; border-radius: 8px; border: 1px solid var(--ie-border); }
+.ie-extra-photo img { width: 100%; height: 100%; object-fit: cover; }
+.ie-extra-photo button { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border: 0; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 10px; cursor: pointer; }
+.ie-field-hint { font-size: 11.5px; color: var(--ie-muted); margin: 4px 0 0; }
+.ie-offer-box { margin-top: 14px; padding: 14px; border: 1px solid var(--ie-line); border-radius: 10px; background: #fafbfc; }
+.ie-offer-box > strong { color: var(--ie-navy); font-size: 13.5px; }
+.ie-offer-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+</style>

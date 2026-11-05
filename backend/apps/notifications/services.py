@@ -8,6 +8,7 @@ from django.template.loader import render_to_string
 from apps.documents.company import LOGO_PATH
 
 from .models import EmailLog, Notification, SmsLog
+from .webpush import send_web_push
 from .sms import SmsProviderError, get_sms_provider
 
 logger = logging.getLogger(__name__)
@@ -152,7 +153,10 @@ def notify_user(user, title, message="", link="", send_email_too=False, send_sms
     systématique (poussée en temps réel si l'utilisateur est connecté), email
     et/ou SMS en complément selon le contexte d'appel."""
     notification = Notification.objects.create(recipient=user, title=title, message=message, link=link)
+    # Temps réel dans l'application ouverte (WebSocket) ET notification push
+    # sur les appareils de l'utilisateur, même application fermée (Web Push).
     _push_realtime(notification)
+    send_web_push(notification)
     if send_email_too and user.email:
         send_transactional_email(
             recipient_email=user.email,
@@ -352,7 +356,7 @@ def notify_new_message(message):
             recipient,
             title=f"Nouveau message de {sender_name}",
             message=preview,
-            link="/messaging",
+            link=f"/app/messaging?conversation={conversation.id}",
         )
 
 
@@ -510,3 +514,64 @@ def notify_reward_expiring_soon(coupon):
         link="/app/referral",
         send_email_too=True,
     )
+
+
+def notify_verification_requested(profile):
+    """Un prestataire vient d'envoyer sa CNI : l'administration doit examiner
+    son profil pour le certifier."""
+    from apps.accounts.models import User
+
+    for admin in User.objects.filter(role=User.Role.ADMIN):
+        notify_user(
+            admin,
+            title="Demande de vérification",
+            message=f"{profile.business_name} a envoyé sa CNI : profil à examiner pour certification.",
+            link="/app/premium-marketplace/badges",
+        )
+
+
+def notify_verification_status_changed(profile):
+    if profile.verification_status == profile.VerificationStatus.NOT_VERIFIED:
+        message = "Votre demande de vérification n'a pas encore été validée. Vérifiez votre CNI et les informations de votre profil."
+    else:
+        message = f"Votre profil a obtenu le statut « {profile.get_verification_status_display()} »."
+    notify_user(profile.user, title="Vérification de votre profil", message=message, link="/app")
+
+
+def _money(amount, currency):
+    return f"{amount:,.0f} {'FCFA' if currency == 'XAF' else currency}".replace(",", " ")
+
+
+def notify_sale_order_created(order):
+    from apps.accounts.models import User
+
+    link = f"/app/boutique/commandes/{order.id}"
+    kind = "Location" if order.order_type == order.OrderType.RENTAL else "Commande"
+    notify_user(
+        order.buyer,
+        title=f"{kind} enregistrée · {order.number}",
+        message=f"Votre facture de {_money(order.total, order.currency)} est prête. Notre équipe vous contacte pour la livraison.",
+        link=link,
+    )
+    for admin in User.objects.filter(role=User.Role.ADMIN, is_active=True):
+        notify_user(
+            admin,
+            title=f"Nouvelle {kind.lower()} boutique · {order.number}",
+            message=f"{order.delivery_name} · {order.delivery_city} · {_money(order.total, order.currency)}",
+            link=link,
+        )
+
+
+SALE_ORDER_UPDATES = {
+    "paid": ("Paiement reçu", "Votre facture {number} est réglée. Merci !"),
+    "cancelled": ("Commande annulée", "Votre commande {number} a été annulée."),
+    "out": ("Votre matériel est en route", "Le matériel de votre location {number} est sorti pour livraison."),
+    "returned": ("Retour enregistré", "Le retour du matériel de votre location {number} est enregistré. Merci !"),
+}
+
+
+def notify_sale_order_update(order, event):
+    title, message = SALE_ORDER_UPDATES.get(event, (None, None))
+    if title:
+        notify_user(order.buyer, title=title, message=message.format(number=order.number), link=f"/app/boutique/commandes/{order.id}")
+

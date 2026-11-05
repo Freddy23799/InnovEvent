@@ -56,7 +56,7 @@ class TalentProfile(models.Model):
 
     REQUIRED_FOR_VISIBILITY = {
         "full_name": "nom complet", "city": "ville", "formation": "formation",
-        "competences": "compétences", "experience": "expérience", "photo": "photo",
+        "competences": "compétences", "experience": "expérience",
     }
 
     @property

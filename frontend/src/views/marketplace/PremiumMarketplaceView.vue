@@ -11,7 +11,6 @@ import { citiesForCountry } from "../../data/countries";
 import { EVENT_TYPE_CATEGORY_MAP, EVENT_TYPES } from "../../data/eventTypeCategories";
 import { CLIENT_TYPES, INTERIOR_DESIGN_CATEGORY_GROUPS, INTERIOR_DESIGN_CATEGORY_LOOKUP, PRICE_RANGES } from "../../data/interiorDesignCategories";
 import api from "../../services/api";
-import { paymentErrorMessage, postPayment } from "../../services/payments";
 import { useMarketplaceAccessStore } from "../../stores/marketplaceAccess";
 import { useToastStore } from "../../stores/toast";
 
@@ -25,14 +24,44 @@ const { t } = useI18n();
 const CATEGORY_BROWSABLE_TYPES = new Set(["actors", "interior_design"]);
 
 const MARKETPLACE_META = {
-  sale: { icon: "fa-solid fa-bag-shopping", tagline: "Objets, mobilier et équipements événementiels à acheter directement.", kind: "listing" },
+  sale: { icon: "fa-solid fa-bag-shopping", tagline: "Matériel événementiel à acheter ou à louer à la journée.", kind: "listing" },
   interior_design: { icon: "fa-solid fa-couch", tagline: "Décorateurs et designers d'intérieur pour vos espaces, au-delà de l'événement.", kind: "profile" },
-  actors: { icon: "fa-solid fa-people-group", tagline: "Prestataires et professionnels de l'événementiel disponibles à la réservation.", kind: "profile" },
-  venues: { icon: "fa-solid fa-building-columns", tagline: "Salles de réception à réserver pour vos événements.", kind: "venue" },
+  actors: { icon: "fa-solid fa-people-group", tagline: "Des prestataires de tous les domaines pour réaliser vos projets.", kind: "profile" },
+  venues: { icon: "fa-solid fa-building-columns", tagline: "Plus de 50 salles de réception pour vos événements.", kind: "venue" },
 };
 
 const route = useRoute();
 const router = useRouter();
+
+// --- Accueil du Marketplace -------------------------------------------------
+const HUB_ORDER = ["sale", "actors", "interior_design", "venues"];
+const HUB_META = {
+  // Chiffres de vitrine affichés en « plus de … » sur l'accueil.
+  sale: { title: "Boutique", unit: "produits", tone: "tone-red", countLabel: "6 000+", points: ["Plus de 6 000 produits", "Achat ou location à la journée", "Total et facture automatiques"] },
+  actors: { title: "Prestataires", unit: "prestataires", tone: "tone-navy", countLabel: "2 000+", points: ["Plus de 2 000 prestataires", "Tous les domaines : événementiel, maison, services…", "Profils vérifiés et devis en ligne"] },
+  interior_design: { title: "Décoration & design", unit: "designs d'intérieur", tone: "tone-gold", countLabel: "300+", points: ["Plus de 300 designs d'intérieur", "Avant / après des réalisations", "Pour l'événement et la maison"] },
+  // Salles : on affiche « Plus de 50 » plutôt que le nombre exact.
+  venues: { title: "Salles de réception", unit: "salles", tone: "tone-teal", countLabel: "50+", points: ["Plus de 50 salles disponibles", "Filtre par ville et capacité", "Visite guidée sur demande"] },
+};
+const POPULAR_TRADES = [
+  { value: "dj", label: "DJ" },
+  { value: "caterer", label: "Traiteur" },
+  { value: "photography", label: "Photographe" },
+  { value: "decoration", label: "Décorateur" },
+  { value: "wedding_planner", label: "Wedding planner" },
+  { value: "mc", label: "MC" },
+];
+const BENEFITS = [
+  { icon: "fa-solid fa-shield-halved", title: "Prestataires vérifiés", text: "Identité et réalisations contrôlées par notre équipe." },
+  { icon: "fa-solid fa-user-shield", title: "Coordonnées protégées", text: "Tout passe par la messagerie de la plateforme." },
+  { icon: "fa-solid fa-file-invoice", title: "Devis & factures en PDF", text: "Des prix clairs, vérifiables par QR code." },
+  { icon: "fa-solid fa-rotate-left", title: "Sans engagement", text: "Vous ne payez que la période choisie." },
+];
+const heroQuery = ref("");
+
+function heroSearch() {
+  router.push({ name: "sale-shop", query: { q: heroQuery.value.trim() || undefined } });
+}
 const toast = useToastStore();
 
 const loading = ref(true);
@@ -68,22 +97,24 @@ function confirmUpsell() {
 const marketplaceAccess = useMarketplaceAccessStore();
 
 async function handleSubscribed() {
+  const subscribedType = checkoutMarketplace.value?.marketplace_type;
   checkoutMarketplace.value = null;
+  if (subscribedType && subscribedType !== "venues") activeType.value = subscribedType;
   await loadInfo();
-  await loadActiveContent();
+  if (activeType.value) await loadActiveContent();
   // La sidebar (layout persistant) lit ce store partagé plutôt que de
   // refaire son propre fetch — sans ça elle resterait figée sur l'état
   // d'avant paiement tant que la page n'est pas rechargée.
   await marketplaceAccess.refresh();
+  // Les métiers débloqués s'affichent tout de suite dans la sidebar.
+  if (CATEGORY_BROWSABLE_TYPES.has(subscribedType)) {
+    marketplaceAccess.revealInSidebar(subscribedType);
+    document.getElementById("mp-universe")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 const listings = ref([]);
 const listingsLoading = ref(false);
-const ordering = reactive({});
-const orderError = reactive({});
-const orderSuccess = reactive({});
-const orderBusy = reactive({});
-const orderCoupon = reactive({});
 
 const profiles = ref([]);
 // Alimenté par les valeurs réellement présentes dans les résultats affichés
@@ -169,21 +200,32 @@ function backToCategories() {
 async function loadInfo() {
   loading.value = true;
   try {
-    const { data } = await api.get("/marketplace/subscriptions/", { params: { marketplace_type: activeType.value } });
+    // Sans univers choisi (accueil), aucun contenu n'est ouvert sous les
+    // cartes : le client choisit d'abord son univers.
+    const { data } = await api.get("/marketplace/subscriptions/", { params: { marketplace_type: activeType.value || undefined } });
     Object.assign(info, data);
-    if (!activeType.value) {
-      activeType.value = data.marketplaces[0]?.marketplace_type;
-      if (activeType.value) {
-        const scoped = await api.get("/marketplace/subscriptions/", { params: { marketplace_type: activeType.value } });
-        Object.assign(info, scoped.data);
-      }
-    }
   } finally {
     loading.value = false;
   }
 }
 
 const activeMarketplace = computed(() => info.marketplaces.find((m) => m.marketplace_type === activeType.value));
+const hubMarketplaces = computed(() =>
+  HUB_ORDER.map((type) => info.marketplaces.find((m) => m.marketplace_type === type)).filter(Boolean)
+);
+
+// Ouvre le contenu d'un univers sous l'accueil et y fait défiler la page.
+async function openUniverse(marketplace) {
+  if (marketplace.marketplace_type === "venues") {
+    router.push({ name: "venues" });
+    return;
+  }
+  await selectMarketplace(marketplace.marketplace_type);
+  document.getElementById("mp-universe")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (marketplace.is_active && CATEGORY_BROWSABLE_TYPES.has(marketplace.marketplace_type)) {
+    marketplaceAccess.revealInSidebar(marketplace.marketplace_type);
+  }
+}
 
 async function selectMarketplace(type) {
   activeType.value = type;
@@ -221,7 +263,6 @@ async function loadListings() {
   try {
     const { data } = await api.get("/marketplace/listings/", { params: { marketplace_type: activeType.value } });
     listings.value = data.results || data;
-    listings.value.forEach((l) => { if (!(l.id in ordering)) ordering[l.id] = 1; });
   } finally {
     listingsLoading.value = false;
   }
@@ -238,6 +279,18 @@ const searchFilters = reactive({
   min_rating: "", is_verified: false, ordering: "", client_type: "", price_range: "",
 });
 let searchDebounce = null;
+
+// Filtres secondaires rangés dans un panneau « Filtres » (barre principale :
+// recherche, ville, tri) — ouvert d'office sur grand écran.
+const filtersOpen = ref(typeof window !== "undefined" && window.innerWidth > 900);
+const advancedFilterCount = computed(() =>
+  [searchFilters.neighborhood, searchFilters.available_on, searchFilters.min_rating, searchFilters.client_type,
+    searchFilters.price_range, searchFilters.is_verified].filter(Boolean).length
+);
+function resetAdvancedFilters() {
+  Object.assign(searchFilters, { neighborhood: "", available_on: "", min_rating: "", client_type: "", price_range: "", is_verified: false });
+  loadProfiles();
+}
 
 const nearMe = reactive({ active: false, lat: null, lng: null, maxDistanceKm: "", loading: false, error: "" });
 
@@ -378,49 +431,9 @@ async function toggleFavoriteRecommended(profile) {
   }
 }
 
-async function orderListing(listing) {
-  orderError[listing.id] = "";
-  orderSuccess[listing.id] = "";
-  orderBusy[listing.id] = true;
-  const quantity = ordering[listing.id] || 1;
-  try {
-    await postPayment(`order:${listing.id}:${quantity}`, "/marketplace/orders/pay/", {
-      listing: listing.id,
-      quantity,
-      payment_provider: "demo",
-      coupon_code: orderCoupon[listing.id] || undefined,
-    });
-    orderSuccess[listing.id] = "Commande payée avec succès.";
-  } catch (e) {
-    orderError[listing.id] = paymentErrorMessage(e, "La commande a échoué.");
-  } finally {
-    orderBusy[listing.id] = false;
-  }
-}
-
-// --- Marketplace vente : recherche/tri (liste déjà chargée en entier côté
-// client, sans pagination — un tri/filtre local suffit, pas besoin d'aller-
-// retour serveur supplémentaire pour ce volume d'annonces). ---------------
-const listingFilters = reactive({ search: "", sort: "" });
-const filteredListings = computed(() => {
-  const query = listingFilters.search.trim().toLowerCase();
-  let result = query
-    ? listings.value.filter((l) => l.title.toLowerCase().includes(query) || (l.description || "").toLowerCase().includes(query))
-    : listings.value;
-  result = [...result];
-  if (listingFilters.sort === "price_asc") result.sort((a, b) => Number(a.price) - Number(b.price));
-  else if (listingFilters.sort === "price_desc") result.sort((a, b) => Number(b.price) - Number(a.price));
-  else if (listingFilters.sort === "newest") result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  return result;
-});
-
-function decrementQty(listing) { ordering[listing.id] = Math.max(1, (ordering[listing.id] || 1) - 1); }
-function incrementQty(listing) { ordering[listing.id] = (ordering[listing.id] || 1) + 1; }
-function subtotal(listing) { return Number(listing.price) * (ordering[listing.id] || 1); }
-
 onMounted(async () => {
   await loadInfo();
-  await loadActiveContent();
+  if (activeType.value) await loadActiveContent();
 });
 
 // La navigation depuis la sidebar (un lien par métier) ne change que la query
@@ -436,125 +449,115 @@ watch(
     selectedCategory.value = nextCategory;
     selectedEventType.value = null;
     showAllCategories.value = false;
-    await loadActiveContent();
+    if (activeType.value) await loadActiveContent();
   }
 );
 </script>
 
 <template>
   <div>
-    <div class="ie-page-header">
+    <div v-if="!showFullHub" class="ie-page-header">
       <div>
         <h1><i class="fa-solid fa-store" style="color: var(--ie-red); margin-right: 8px;"></i>{{ $t("marketplace.title") }}</h1>
         <p class="ie-page-subtitle">{{ $t("marketplace.subtitle") }}</p>
       </div>
-      <div class="ie-page-header-actions">
-        <router-link :to="{ name: 'dashboard' }" class="ie-btn ie-btn-ghost">
-          <i class="fa-solid fa-arrow-left"></i> {{ $t("marketplace.backToDashboard") }}
-        </router-link>
-      </div>
     </div>
 
-    <div v-if="loading" class="ie-skeleton" style="height: 200px;"></div>
+    <div v-if="loading" class="ie-skeleton" style="height: 320px; border-radius: 18px;"></div>
 
     <template v-else>
       <template v-if="showFullHub">
-      <div class="ie-mp-grid">
-        <div v-for="m in info.marketplaces" :key="m.marketplace_type" class="ie-mp-card" :class="{ 'is-active': activeType === m.marketplace_type }">
-          <button type="button" class="ie-mp-card-select" @click="selectMarketplace(m.marketplace_type)">
-            <span class="ie-mp-icon"><i :class="MARKETPLACE_META[m.marketplace_type]?.icon"></i></span>
-            <span class="ie-mp-title">{{ m.marketplace_label }}</span>
-            <span class="ie-mp-tagline">{{ MARKETPLACE_META[m.marketplace_type]?.tagline }}</span>
-            <span v-if="m.is_active" class="ie-badge ie-badge-success">
-              <i class="fa-solid fa-circle-check"></i> {{ $t("marketplace.subscribedUntil", { date: new Date(m.expires_at).toLocaleDateString($i18n.locale) }) }}
-            </span>
-          </button>
-          <template v-if="!m.is_active">
-            <p class="ie-mp-price-from">
-              À partir de {{ Number(info.plans[0]?.price || 0).toLocaleString('fr-FR') }} XAF/mois
-            </p>
-            <button type="button" class="ie-mp-subscribe-btn" @click="openCheckout(m)">
-              <i class="fa-solid fa-lock-open"></i> {{ $t("marketplace.subscribe") }}
-            </button>
-          </template>
-        </div>
-      </div>
-
-      <section class="ie-mp-about">
-        <h2 class="ie-mp-section-title"><i class="fa-solid fa-circle-info"></i> Pourquoi s'abonner au Marketplace InnovEvent ?</h2>
-        <div class="ie-mp-about-grid">
-          <div class="ie-mp-benefit">
-            <i class="fa-solid fa-shield-halved"></i>
-            <div>
-              <strong>Prestataires vérifiés</strong>
-              <p>Chaque profil est contrôlé par notre équipe avant publication — badge « Vérifié » et avis clients authentiques.</p>
-            </div>
-          </div>
-          <div class="ie-mp-benefit">
-            <i class="fa-solid fa-file-signature"></i>
-            <div>
-              <strong>Devis structurés et sécurisés</strong>
-              <p>Chaque devis est signé, exportable en PDF avec code QR de vérification — aucune mauvaise surprise sur le prix.</p>
-            </div>
-          </div>
-          <div class="ie-mp-benefit">
-            <i class="fa-solid fa-user-shield"></i>
-            <div>
-              <strong>Vos coordonnées restent privées</strong>
-              <p>Toute la négociation passe par la messagerie intégrée de la plateforme — votre téléphone et votre email ne sont jamais partagés.</p>
-            </div>
-          </div>
-          <div class="ie-mp-benefit">
-            <i class="fa-solid fa-wand-magic-sparkles"></i>
-            <div>
-              <strong>Recommandations personnalisées</strong>
-              <p>Des suggestions basées sur vos favoris et vos demandes, pour trouver le bon prestataire plus vite.</p>
-            </div>
-          </div>
-          <div class="ie-mp-benefit">
-            <i class="fa-solid fa-calendar-check"></i>
-            <div>
-              <strong>Réservation directe et suivi</strong>
-              <p>Envoyez une demande, suivez son statut en temps réel et échangez jusqu'à la confirmation — tout depuis votre tableau de bord.</p>
-            </div>
-          </div>
-          <div class="ie-mp-benefit">
-            <i class="fa-solid fa-rotate-left"></i>
-            <div>
-              <strong>Sans engagement</strong>
-              <p>Choisissez la durée qui vous convient et ne renouvelez que si vous le souhaitez — aucun engagement au-delà de la période payée.</p>
-            </div>
+      <!-- Accueil du Marketplace -->
+      <section class="mph-hero">
+        <div class="mph-hero-text">
+          <span class="mph-eyebrow"><i class="fa-solid fa-store"></i> Le Marketplace InnovEvent</span>
+          <h1>Tout pour réussir votre événement, au même endroit</h1>
+          <p>Plus de 6 000 produits à acheter ou louer, plus de 2 000 prestataires de tous les domaines, plus de 300 designs d'intérieur et plus de 50 salles de réception : comparez, demandez un devis et réservez sans quitter la plateforme.</p>
+          <form class="mph-search" role="search" @submit.prevent="heroSearch">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input v-model="heroQuery" type="search" placeholder="Rechercher un produit : chaises, verres, nappes…" aria-label="Rechercher dans la boutique" />
+            <button type="submit" aria-label="Rechercher"><span>Rechercher</span><i class="fa-solid fa-arrow-right"></i></button>
+          </form>
+          <div class="mph-popular">
+            <span>Populaires :</span>
+            <router-link v-for="p in POPULAR_TRADES" :key="p.value" :to="{ name: 'premium-marketplace', query: { type: 'actors', category: p.value } }">{{ p.label }}</router-link>
           </div>
         </div>
-
-        <h3 class="ie-mp-about-pricing-title">Tarifs</h3>
-        <div class="ie-table-wrap">
-          <table class="ie-table ie-mp-pricing-table">
-            <thead>
-              <tr><th>Formule</th><th>Prix</th><th>Équivalent mensuel</th><th>Réduction</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="plan in info.plans" :key="plan.code">
-                <td><strong>{{ plan.label }}</strong></td>
-                <td class="ie-num">{{ Number(plan.price).toLocaleString('fr-FR') }} {{ plan.currency }}</td>
-                <td class="ie-num">{{ Math.round(plan.price / plan.months).toLocaleString('fr-FR') }} {{ plan.currency }}/mois</td>
-                <td>
-                  <span v-if="plan.discount_percent" class="ie-badge ie-badge-success">-{{ plan.discount_percent }}%</span>
-                  <span v-else class="ie-badge ie-badge-neutral">—</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="ie-field-hint" style="margin-top: 8px;">Tarif identique pour les 4 marketplaces premium (Marketplace vente, Décoration & design intérieur, Marketplace des acteurs, Salles de réception) — un abonnement par marketplace, choisissez celui qui correspond à votre besoin ci-dessus.</p>
+        <ul class="mph-hero-stats">
+          <li v-for="m in hubMarketplaces" :key="m.marketplace_type">
+            <strong>{{ HUB_META[m.marketplace_type].countLabel || (m.item_count ?? "—") }}</strong>
+            <span>{{ HUB_META[m.marketplace_type].unit }}</span>
+          </li>
+        </ul>
       </section>
+
+      <section class="mph-section">
+        <div class="mph-section-head">
+          <h2>Choisissez votre univers</h2>
+          <p>Un abonnement par univers — la boutique est gratuite pour tous.</p>
+        </div>
+        <div class="mph-cards">
+          <article
+            v-for="m in hubMarketplaces" :key="m.marketplace_type" class="mph-card"
+            :class="[HUB_META[m.marketplace_type].tone, { 'is-active': activeType === m.marketplace_type && m.marketplace_type !== 'sale' }]"
+          >
+            <div class="mph-card-top">
+              <span class="mph-card-icon"><i :class="MARKETPLACE_META[m.marketplace_type].icon"></i></span>
+              <span v-if="m.is_free" class="mph-status free"><i class="fa-solid fa-gift"></i> Gratuit</span>
+              <span v-else-if="m.is_active" class="mph-status on"><i class="fa-solid fa-circle-check"></i> Abonné</span>
+              <span v-else class="mph-status"><i class="fa-solid fa-lock"></i> Premium</span>
+            </div>
+            <h3>{{ HUB_META[m.marketplace_type].title }}</h3>
+            <p class="mph-card-tagline">{{ MARKETPLACE_META[m.marketplace_type].tagline }}</p>
+            <ul class="mph-card-points">
+              <li v-for="point in HUB_META[m.marketplace_type].points" :key="point"><i class="fa-solid fa-check"></i> {{ point }}</li>
+            </ul>
+            <div class="mph-card-foot">
+              <div class="mph-card-meta">
+                <strong>{{ HUB_META[m.marketplace_type].countLabel || (m.item_count ?? 0) }}</strong> {{ HUB_META[m.marketplace_type].unit }}
+                <small v-if="m.is_active && m.expires_at">jusqu'au {{ new Date(m.expires_at).toLocaleDateString("fr-FR") }}</small>
+                <small v-else-if="!m.is_free">sur abonnement</small>
+                <small v-else-if="m.is_free">achat & location</small>
+              </div>
+              <router-link v-if="m.is_free" :to="{ name: 'sale-shop' }" class="mph-cta">
+                Accéder <i class="fa-solid fa-arrow-right"></i>
+              </router-link>
+              <button v-else-if="m.is_active || m.marketplace_type === 'venues'" type="button" class="mph-cta" @click="openUniverse(m)">
+                Explorer <i class="fa-solid fa-arrow-right"></i>
+              </button>
+              <div v-else class="mph-cta-group">
+                <button type="button" class="mph-cta ghost" @click="openUniverse(m)">Découvrir</button>
+                <button type="button" class="mph-cta" @click="openCheckout(m)"><i class="fa-solid fa-lock-open"></i> S'abonner</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="mph-section mph-steps">
+        <div class="mph-section-head"><h2>Comment ça marche ?</h2></div>
+        <ol>
+          <li><span>1</span><i class="fa-solid fa-compass"></i><strong>Choisissez</strong><p>Parcourez la boutique ou les prestataires par type d'événement et par métier.</p></li>
+          <li><span>2</span><i class="fa-solid fa-file-signature"></i><strong>Comparez & demandez</strong><p>Consultez les avis et réalisations, puis demandez un devis en un clic.</p></li>
+          <li><span>3</span><i class="fa-solid fa-calendar-check"></i><strong>Réservez</strong><p>Validez, suivez tout depuis votre espace et échangez via la messagerie.</p></li>
+        </ol>
+      </section>
+
+      <section class="mph-section mph-benefits">
+        <div v-for="b in BENEFITS" :key="b.title" class="mph-benefit">
+          <span><i :class="b.icon"></i></span>
+          <div><strong>{{ b.title }}</strong><p>{{ b.text }}</p></div>
+        </div>
+      </section>
+
       </template>
 
       <div v-else-if="activeMarketplace" class="ie-tier-strip">
         <router-link :to="{ name: 'premium-marketplace' }" class="ie-btn ie-btn-ghost ie-btn-sm">
           <i class="fa-solid fa-arrow-left"></i> Marketplaces
         </router-link>
-        <template v-if="!activeMarketplace.is_active">
+        <span v-if="activeMarketplace.is_free" class="ie-tier-strip-text"><i class="fa-solid fa-gift"></i> Accès gratuit, sans abonnement.</span>
+        <template v-else-if="!activeMarketplace.is_active">
           <span class="ie-tier-strip-text"><i class="fa-solid fa-lock"></i> Vous n'êtes pas encore abonné à « {{ activeMarketplace.marketplace_label }} ».</span>
           <button type="button" class="ie-btn ie-btn-primary ie-btn-sm ie-tier-strip-cta" @click="openCheckout(activeMarketplace)">
             <i class="fa-solid fa-lock-open"></i> S'abonner
@@ -571,7 +574,8 @@ watch(
       </div>
 
       <template v-if="activeMarketplace">
-        <div v-if="!activeMarketplace.is_active" class="ie-mp-upsell-banner">
+        <span id="mp-universe" class="mph-anchor"></span>
+        <div v-if="!activeMarketplace.is_active && !activeMarketplace.is_free" class="ie-mp-upsell-banner">
           <i class="fa-solid fa-lock"></i>
           <span>{{ $t("marketplace.upsellBanner", { label: activeMarketplace.marketplace_label }) }}</span>
         </div>
@@ -683,62 +687,29 @@ watch(
           </h2>
 
         <template v-if="activeKind === 'listing'">
-          <div class="ie-sale-explainer">
-            <i class="fa-solid fa-circle-info"></i>
-            <p>Achetez directement objets, mobilier et équipements événementiels — annonces publiées par InnovEvent ou par des prestataires vérifiés. Paiement sécurisé sur la plateforme, sans abonnement requis.</p>
-          </div>
-
-          <div class="ie-search-bar">
-            <div class="ie-search-input">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <input v-model="listingFilters.search" placeholder="Rechercher une annonce..." />
+          <div class="ie-shop-teaser">
+            <div class="ie-shop-teaser-text">
+              <span class="ie-shop-teaser-badge"><i class="fa-solid fa-gift"></i> Gratuit · sans abonnement</span>
+              <h3>La boutique de l'événementiel</h3>
+              <p>Choisissez vos équipements, le total se calcule automatiquement et votre facture est générée immédiatement. Paiement à la livraison.</p>
+              <router-link :to="{ name: 'sale-shop' }" class="ie-btn ie-btn-primary">
+                <i class="fa-solid fa-bag-shopping"></i> Ouvrir la boutique
+              </router-link>
             </div>
-            <select v-model="listingFilters.sort" class="ie-select ie-search-filter">
-              <option value="">Pertinence</option>
-              <option value="newest">Nouveautés</option>
-              <option value="price_asc">Prix croissant</option>
-              <option value="price_desc">Prix décroissant</option>
-            </select>
-          </div>
-
-          <div v-if="listingsLoading" class="ie-catalog-grid">
-            <div v-for="i in 3" :key="i" class="ie-skeleton" style="height: 300px;"></div>
-          </div>
-          <div v-else-if="filteredListings.length" class="ie-catalog-grid">
-            <div v-for="listing in filteredListings" :key="listing.id" class="ie-card ie-listing-card">
-              <div class="ie-listing-photo">
-                <img v-if="listing.photo" v-img="listing.photo" :alt="listing.title" />
-                <i v-else class="fa-solid fa-box-open"></i>
-                <span class="ie-badge ie-badge-neutral ie-listing-seller-badge">
-                  <i class="fa-solid" :class="listing.provider_name || listing.created_by_name ? 'fa-handshake' : 'fa-store'"></i>
-                  {{ listing.provider_name || listing.created_by_name || "InnovEvent" }}
+            <div v-if="listings.length" class="ie-shop-teaser-products">
+              <router-link
+                v-for="listing in listings.slice(0, 4)" :key="listing.id"
+                :to="{ name: 'sale-product', params: { id: listing.id } }" class="ie-shop-teaser-item"
+              >
+                <span class="ie-shop-teaser-media">
+                  <img v-if="listing.photo" v-img="listing.photo" :alt="listing.title" />
+                  <i v-else class="fa-solid fa-box-open"></i>
                 </span>
-              </div>
-              <div class="ie-card-body">
-                <h3>{{ listing.title }}</h3>
-                <p class="ie-listing-desc">{{ listing.description || "Aucune description fournie." }}</p>
-                <strong class="ie-listing-price">{{ Number(listing.price).toLocaleString('fr-FR') }} {{ listing.currency }}</strong>
-
-                <div class="ie-listing-order-row">
-                  <div class="ie-qty-stepper">
-                    <button type="button" @click="decrementQty(listing)" :disabled="(ordering[listing.id] || 1) <= 1"><i class="fa-solid fa-minus"></i></button>
-                    <span>{{ ordering[listing.id] || 1 }}</span>
-                    <button type="button" @click="incrementQty(listing)"><i class="fa-solid fa-plus"></i></button>
-                  </div>
-                  <button class="ie-btn ie-btn-primary ie-btn-sm" :disabled="orderBusy[listing.id]" @click="orderListing(listing)">
-                    <i class="fa-solid fa-cart-shopping"></i> Commander · {{ subtotal(listing).toLocaleString('fr-FR') }} {{ listing.currency }}
-                  </button>
-                </div>
-                <input
-                  v-model="orderCoupon[listing.id]" class="ie-input" style="margin-top: 6px; font-size: 12px; padding: 6px 10px;"
-                  placeholder="Code de réduction (optionnel)"
-                />
-                <p v-if="orderSuccess[listing.id]" class="ie-alert ie-alert-success" style="margin-top: 8px;">{{ orderSuccess[listing.id] }}</p>
-                <p v-if="orderError[listing.id]" class="ie-alert ie-alert-danger" style="margin-top: 8px;">{{ orderError[listing.id] }}</p>
-              </div>
+                <strong>{{ listing.title }}</strong>
+                <span>{{ Number(listing.price).toLocaleString('fr-FR') }} {{ listing.currency === "XAF" ? "FCFA" : listing.currency }}</span>
+              </router-link>
             </div>
           </div>
-          <EmptyState v-else icon="fa-solid fa-box-open" :text="`Aucune annonce dans « ${activeMarketplace.marketplace_label} » pour le moment.`" />
         </template>
 
         <template v-else-if="activeKind === 'venue'">
@@ -753,68 +724,92 @@ watch(
         </template>
 
         <template v-else>
-          <div class="ie-search-bar">
-            <div class="ie-search-input">
-              <i class="fa-solid fa-magnifying-glass"></i>
-              <input v-model="searchFilters.search" :placeholder="$t('marketplace.searchPlaceholder')" @input="onFiltersChanged" />
+          <div class="mpf">
+            <div class="mpf-main">
+              <div class="ie-search-input mpf-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input v-model="searchFilters.search" :placeholder="$t('marketplace.searchPlaceholder')" @input="onFiltersChanged" />
+              </div>
+              <select v-model="searchFilters.city" class="ie-select mpf-select" aria-label="Ville" @change="loadProfiles">
+                <option value="">{{ $t("marketplace.allCities") }}</option>
+                <option v-for="c in CAMEROON_CITIES" :key="c.name" :value="c.name">{{ c.name }}</option>
+              </select>
+              <select v-model="searchFilters.ordering" class="ie-select mpf-select" aria-label="Trier" @change="loadProfiles">
+                <option value="">{{ $t("marketplace.relevance") }}</option>
+                <option value="top_rated">{{ $t("marketplace.topRated") }}</option>
+                <option value="newest">{{ $t("marketplace.newest") }}</option>
+                <option value="price_asc">{{ $t("marketplace.priceAsc") }}</option>
+                <option value="price_desc">{{ $t("marketplace.priceDesc") }}</option>
+                <option v-if="nearMe.active" value="nearest">{{ $t("marketplace.nearest") }}</option>
+              </select>
+              <button type="button" class="mpf-toggle" :class="{ active: filtersOpen || advancedFilterCount }" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">
+                <i class="fa-solid fa-sliders"></i> Filtres
+                <span v-if="advancedFilterCount">{{ advancedFilterCount }}</span>
+              </button>
             </div>
-            <select v-model="searchFilters.city" class="ie-select ie-search-filter" @change="loadProfiles">
-              <option value="">{{ $t("marketplace.allCities") }}</option>
-              <option v-for="c in CAMEROON_CITIES" :key="c.name" :value="c.name">{{ c.name }}</option>
-            </select>
-            <select v-model="searchFilters.neighborhood" class="ie-select ie-search-filter" @change="loadProfiles">
-              <option value="">Tout quartier</option>
-              <option v-for="n in neighborhoodOptions" :key="n" :value="n">{{ n }}</option>
-            </select>
-            <input
-              v-model="searchFilters.available_on" type="date" class="ie-select ie-search-filter"
-              title="Disponible le..." @change="loadProfiles"
-            />
-            <select v-model="searchFilters.min_rating" class="ie-select ie-search-filter" @change="loadProfiles">
-              <option value="">{{ $t("marketplace.allRatings") }}</option>
-              <option value="4">{{ $t("marketplace.ratingAndAbove", { stars: 4 }) }}</option>
-              <option value="3">{{ $t("marketplace.ratingAndAbove", { stars: 3 }) }}</option>
-            </select>
-            <template v-if="activeType === 'interior_design'">
-              <select v-model="searchFilters.client_type" class="ie-select ie-search-filter" @change="loadProfiles">
-                <option value="">Tout type de client</option>
-                <option v-for="c in CLIENT_TYPES" :key="c.value" :value="c.value">{{ c.label }}</option>
-              </select>
-              <select v-model="searchFilters.price_range" class="ie-select ie-search-filter" @change="loadProfiles">
-                <option value="">Toute gamme de prix</option>
-                <option v-for="p in PRICE_RANGES" :key="p.value" :value="p.value">{{ p.label }}</option>
-              </select>
-            </template>
-            <label class="ie-search-checkbox">
-              <input type="checkbox" v-model="searchFilters.is_verified" @change="loadProfiles" /> {{ $t("marketplace.verifiedOnly") }}
-            </label>
-            <select v-model="searchFilters.ordering" class="ie-select ie-search-filter" @change="loadProfiles">
-              <option value="">{{ $t("marketplace.relevance") }}</option>
-              <option value="top_rated">{{ $t("marketplace.topRated") }}</option>
-              <option value="newest">{{ $t("marketplace.newest") }}</option>
-              <option value="price_asc">{{ $t("marketplace.priceAsc") }}</option>
-              <option value="price_desc">{{ $t("marketplace.priceDesc") }}</option>
-              <option v-if="nearMe.active" value="nearest">{{ $t("marketplace.nearest") }}</option>
-            </select>
-            <button
-              type="button" class="ie-btn ie-btn-outline ie-search-filter" :class="{ 'is-active': nearMe.active }"
-              :disabled="nearMe.loading" @click="useNearMe"
-            >
-              <i class="fa-solid" :class="nearMe.loading ? 'fa-spinner fa-spin' : 'fa-location-crosshairs'"></i>
-              {{ nearMe.active ? $t("marketplace.nearMeActive") : $t("marketplace.nearMe") }}
-            </button>
-            <select v-if="nearMe.active" v-model="nearMe.maxDistanceKm" class="ie-select ie-search-filter" @change="loadProfiles">
-              <option value="">{{ $t("marketplace.allDistances") }}</option>
-              <option value="10">{{ $t("marketplace.distanceUpTo", { km: 10 }) }}</option>
-              <option value="25">{{ $t("marketplace.distanceUpTo", { km: 25 }) }}</option>
-              <option value="50">{{ $t("marketplace.distanceUpTo", { km: 50 }) }}</option>
-              <option value="100">{{ $t("marketplace.distanceUpTo", { km: 100 }) }}</option>
-            </select>
+
+            <div v-show="filtersOpen" class="mpf-panel">
+              <label class="mpf-field">
+                <span>Quartier</span>
+                <select v-model="searchFilters.neighborhood" class="ie-select" @change="loadProfiles">
+                  <option value="">Tout quartier</option>
+                  <option v-for="n in neighborhoodOptions" :key="n" :value="n">{{ n }}</option>
+                </select>
+              </label>
+              <label class="mpf-field">
+                <span>Disponible le</span>
+                <input v-model="searchFilters.available_on" type="date" class="ie-input" @change="loadProfiles" />
+              </label>
+              <label class="mpf-field">
+                <span>Note minimale</span>
+                <select v-model="searchFilters.min_rating" class="ie-select" @change="loadProfiles">
+                  <option value="">{{ $t("marketplace.allRatings") }}</option>
+                  <option value="4">{{ $t("marketplace.ratingAndAbove", { stars: 4 }) }}</option>
+                  <option value="3">{{ $t("marketplace.ratingAndAbove", { stars: 3 }) }}</option>
+                </select>
+              </label>
+              <template v-if="activeType === 'interior_design'">
+                <label class="mpf-field">
+                  <span>Type de client</span>
+                  <select v-model="searchFilters.client_type" class="ie-select" @change="loadProfiles">
+                    <option value="">Tout type de client</option>
+                    <option v-for="c in CLIENT_TYPES" :key="c.value" :value="c.value">{{ c.label }}</option>
+                  </select>
+                </label>
+                <label class="mpf-field">
+                  <span>Gamme de prix</span>
+                  <select v-model="searchFilters.price_range" class="ie-select" @change="loadProfiles">
+                    <option value="">Toute gamme de prix</option>
+                    <option v-for="p in PRICE_RANGES" :key="p.value" :value="p.value">{{ p.label }}</option>
+                  </select>
+                </label>
+              </template>
+              <div class="mpf-field">
+                <span>Proximité</span>
+                <div class="mpf-near">
+                  <button type="button" class="ie-btn ie-btn-outline" :class="{ 'is-active': nearMe.active }" :disabled="nearMe.loading" @click="useNearMe">
+                    <i class="fa-solid" :class="nearMe.loading ? 'fa-spinner fa-spin' : 'fa-location-crosshairs'"></i>
+                    {{ nearMe.active ? $t("marketplace.nearMeActive") : $t("marketplace.nearMe") }}
+                  </button>
+                  <select v-if="nearMe.active" v-model="nearMe.maxDistanceKm" class="ie-select" @change="loadProfiles">
+                    <option value="">{{ $t("marketplace.allDistances") }}</option>
+                    <option v-for="km in [10, 25, 50, 100]" :key="km" :value="String(km)">{{ $t("marketplace.distanceUpTo", { km }) }}</option>
+                  </select>
+                </div>
+              </div>
+              <label class="mpf-check">
+                <input type="checkbox" v-model="searchFilters.is_verified" @change="loadProfiles" /> {{ $t("marketplace.verifiedOnly") }}
+              </label>
+              <button v-if="advancedFilterCount" type="button" class="mpf-reset" @click="resetAdvancedFilters">
+                <i class="fa-solid fa-rotate-left"></i> Réinitialiser
+              </button>
+            </div>
           </div>
           <p v-if="nearMe.error" class="ie-alert ie-alert-danger" style="margin-bottom: 12px;">{{ nearMe.error }}</p>
 
+          <p v-if="!profilesLoading" class="mpf-count"><strong>{{ profiles.length }}</strong> prestataire{{ profiles.length > 1 ? "s" : "" }}{{ selectedCategoryLabel ? ` · ${selectedCategoryLabel}` : "" }}</p>
           <div v-if="profilesLoading" class="ie-catalog-grid">
-            <div v-for="i in 3" :key="i" class="ie-skeleton" style="height: 260px;"></div>
+            <div v-for="i in 6" :key="i" class="ie-skeleton" style="height: 330px; border-radius: 16px;"></div>
           </div>
           <div v-else-if="profiles.length" class="ie-catalog-grid">
             <router-link
@@ -913,6 +908,114 @@ watch(
 </template>
 
 <style scoped>
+/* --- Accueil du Marketplace --- */
+.mph-hero {
+  display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 26px; align-items: center; padding: 38px 40px; border-radius: 20px; color: #fff;
+  background: var(--ie-hero-gradient);
+  box-shadow: 0 18px 44px #18283b26;
+}
+.mph-eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: #ffffff1c; color: #ffe1e1; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.mph-hero h1 { margin: 14px 0 10px; max-width: 640px; color: #fff; font-size: clamp(26px, 3.6vw, 40px); line-height: 1.1; }
+.mph-hero-text > p { margin: 0; max-width: 620px; color: #d6dfe8; font-size: 15px; line-height: 1.6; }
+.mph-search { display: flex; align-items: center; max-width: 620px; height: 54px; margin-top: 22px; padding-left: 18px; overflow: hidden; border-radius: 14px; background: #fff; box-shadow: 0 12px 30px #0003; }
+.mph-search i { color: var(--ie-muted); }
+.mph-search input { flex: 1; min-width: 0; height: 100%; padding: 0 12px; border: 0; color: var(--ie-ink); font-size: 15px; font-family: inherit; }
+.mph-search input:focus { outline: none; }
+.mph-search button i { display: none; }
+.mph-search button { height: 100%; padding: 0 22px; border: 0; background: var(--ie-red); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.mph-search button:hover { background: #a11f25; }
+.mph-popular { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; font-size: 12.5px; }
+.mph-popular span { color: #b9c6d3; }
+.mph-popular a { padding: 5px 12px; border: 1px solid #ffffff38; border-radius: 999px; color: #fff; text-decoration: none; font-weight: 600; }
+.mph-popular a:hover { background: #ffffff1a; }
+.mph-hero-stats { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.mph-hero-text { min-width: 0; }
+.mph-hero-stats li { min-width: 0; display: flex; align-items: baseline; gap: 10px; padding: 12px 16px; border: 1px solid #ffffff22; border-radius: 12px; background: #ffffff10; backdrop-filter: blur(4px); }
+.mph-hero-stats strong { font-size: 24px; white-space: nowrap; }
+.mph-hero-stats span { color: #c9d4df; font-size: 13px; }
+
+.mph-section { margin-top: 34px; }
+.mph-section-head { margin-bottom: 16px; }
+.mph-section-head h2 { margin: 0; color: var(--ie-navy); font-size: 22px; }
+.mph-section-head p { margin: 4px 0 0; color: var(--ie-muted); font-size: 13.5px; }
+
+.mph-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.mph-card {
+  --tone: var(--ie-navy); --tone-soft: var(--ie-navy-soft);
+  position: relative; display: flex; flex-direction: column; overflow: hidden; padding: 20px; border: 1px solid var(--ie-line); border-radius: 18px; background: #fff;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.mph-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 5px; background: var(--tone); }
+@media (hover: hover) { .mph-card:hover { transform: translateY(-4px); box-shadow: 0 18px 40px #18283b1c; } }
+.mph-card.is-active { border-color: var(--tone); box-shadow: 0 0 0 2px var(--tone-soft); }
+.mph-card.tone-red { --tone: #c0272d; --tone-soft: #f6e2e3; }
+.mph-card.tone-navy { --tone: #24384f; --tone-soft: #e3e9f0; }
+.mph-card.tone-gold { --tone: #b07a19; --tone-soft: #f7ecd6; }
+.mph-card.tone-teal { --tone: #1f7a73; --tone-soft: #dcf0ee; }
+.mph-card-top { display: flex; align-items: center; justify-content: space-between; }
+.mph-card-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 14px; background: var(--tone-soft); color: var(--tone); font-size: 21px; }
+.mph-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #f0f2f5; color: #5d6771; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+.mph-status.free { background: var(--ie-success-soft); color: var(--ie-success); }
+.mph-status.on { background: var(--tone-soft); color: var(--tone); }
+.mph-card h3 { margin: 16px 0 4px; color: var(--ie-ink); font-size: 18px; }
+.mph-card-tagline { margin: 0; color: var(--ie-muted); font-size: 13px; line-height: 1.5; }
+.mph-card-points { display: grid; gap: 6px; margin: 14px 0 16px; padding: 0; list-style: none; font-size: 13px; color: #3c4b5b; }
+.mph-card-points i { width: 16px; color: var(--tone); font-size: 11px; }
+.mph-card-foot { display: flex; flex-direction: column; gap: 12px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--ie-line); }
+.mph-card-meta { color: #4b5a6a; font-size: 13px; }
+.mph-card-meta strong { color: var(--ie-navy); font-size: 18px; }
+.mph-card-meta small { display: block; color: var(--ie-muted); font-size: 12px; }
+.mph-cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 11px 14px; border: 1px solid var(--tone);
+  border-radius: 10px; background: var(--tone); color: #fff; font-size: 13.5px; font-weight: 700; text-decoration: none; cursor: pointer; font-family: inherit;
+}
+.mph-cta:hover { filter: brightness(1.1); }
+.mph-cta.ghost { background: #fff; color: var(--tone); }
+.mph-cta-group { display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px; }
+
+.mph-steps ol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 0; padding: 0; list-style: none; counter-reset: none; }
+.mph-steps li { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 22px; border: 1px solid var(--ie-line); border-radius: 16px; background: #fff; }
+.mph-steps li > span { position: absolute; top: 16px; right: 18px; color: #e9ecf0; font-size: 42px; font-weight: 900; line-height: 1; }
+.mph-steps li > i { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--ie-red-soft); color: var(--ie-red); font-size: 18px; }
+.mph-steps strong { margin-top: 6px; color: var(--ie-navy); font-size: 16px; }
+.mph-steps p { margin: 0; color: var(--ie-muted); font-size: 13px; line-height: 1.5; }
+
+.mph-benefits { display: grid; grid-template-columns: repeat(4, 1fr); overflow: hidden; border: 1px solid var(--ie-line); border-radius: 16px; background: #fff; }
+.mph-benefit { display: flex; gap: 12px; padding: 18px; }
+.mph-benefit + .mph-benefit { border-left: 1px solid var(--ie-line); }
+.mph-benefit > span { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 40px; border-radius: 10px; background: var(--ie-navy-soft); color: var(--ie-navy); }
+.mph-benefit strong { color: var(--ie-navy); font-size: 13.5px; }
+.mph-benefit p { margin: 3px 0 0; color: var(--ie-muted); font-size: 12.5px; line-height: 1.45; }
+
+.mph-anchor { display: block; scroll-margin-top: 12px; height: 1px; margin-top: 30px; }
+
+@media (max-width: 1100px) {
+  .mph-cards { grid-template-columns: repeat(2, 1fr); }
+  .mph-benefits { grid-template-columns: repeat(2, 1fr); }
+  .mph-benefit:nth-child(3) { border-left: 0; }
+  .mph-benefit:nth-child(n + 3) { border-top: 1px solid var(--ie-line); }
+}
+@media (max-width: 860px) {
+  .mph-hero { grid-template-columns: minmax(0, 1fr); padding: 24px 18px; border-radius: 16px; }
+  .mph-hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mph-hero-stats li { flex-direction: column; align-items: flex-start; gap: 0; padding: 10px 12px; }
+  .mph-hero-stats strong { font-size: 20px; white-space: nowrap; }
+  .mph-steps ol { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .mph-cards, .mph-benefits { grid-template-columns: 1fr; }
+  .mph-benefit { border-left: 0 !important; }
+  .mph-benefit + .mph-benefit { border-top: 1px solid var(--ie-line); }
+  .mph-search { height: 48px; padding-left: 14px; }
+  .mph-search button { width: 50px; padding: 0; }
+  .mph-search button span { display: none; }
+  .mph-search button i { display: inline; }
+  .mph-hero h1 { font-size: 24px; }
+  .mph-hero-text > p { font-size: 14px; }
+  .mph-cta-group { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .mph-card { transition: none; } }
+
 .ie-mp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px; }
 .ie-mp-card {
   background: #fff; border: 1px solid var(--ie-line); border-radius: 12px; padding: 4px;
@@ -937,6 +1040,26 @@ watch(
 }
 .ie-mp-subscribe-btn:hover:not(:disabled) { background: #8a0e16; }
 .ie-mp-subscribe-btn:disabled { opacity: 0.7; cursor: default; }
+.ie-mp-access-btn { background: var(--ie-navy); text-decoration: none; justify-content: center; }
+.ie-mp-access-btn:hover { background: #2b394a !important; }
+.ie-mp-free { color: var(--ie-success) !important; font-weight: 700; }
+.ie-shop-teaser {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 24px; align-items: center; padding: 26px;
+  border-radius: 18px; color: #fff; background: var(--ie-hero-gradient);
+}
+.ie-shop-teaser-badge { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: #ffffff1c; color: #ffe1e1; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.ie-shop-teaser h3 { margin: 12px 0 8px; font-size: 24px; color: #fff; }
+.ie-shop-teaser p { margin: 0 0 16px; color: #dfe6ee; font-size: 13.5px; line-height: 1.55; }
+.ie-shop-teaser-products { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.ie-shop-teaser-item { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 12px; background: #fff; color: var(--ie-ink); text-decoration: none; min-width: 0; }
+.ie-shop-teaser-media { display: grid; place-items: center; aspect-ratio: 1; overflow: hidden; border-radius: 8px; background: #f2f4f6; color: #b4bcc4; font-size: 22px; }
+.ie-shop-teaser-media img { width: 100%; height: 100%; object-fit: cover; }
+.ie-shop-teaser-item strong { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ie-shop-teaser-item > span:last-child { color: var(--ie-navy); font-size: 12px; font-weight: 800; }
+@media (max-width: 860px) {
+  .ie-shop-teaser { grid-template-columns: 1fr; padding: 20px; }
+  .ie-shop-teaser-products { grid-template-columns: repeat(2, 1fr); }
+}
 
 .ie-tier-strip {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 18px;
@@ -965,7 +1088,7 @@ watch(
 .ie-mp-pricing-table th { font-size: 11.5px; }
 @media (max-width: 700px) { .ie-mp-about { padding: 20px; } }
 
-.ie-category-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.ie-category-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
 .ie-category-group {
   background: #fff; border: 1px solid var(--ie-line); border-radius: 12px; padding: 18px;
 }
@@ -1010,7 +1133,7 @@ watch(
 .ie-upsell-cta { width: 100%; padding: 12px; }
 
 .ie-event-quiz { max-width: 720px; }
-.ie-event-type-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.ie-event-type-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; }
 .ie-event-type-card {
   display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;
   background: #fff; border: 1px solid var(--ie-line); border-radius: 12px; padding: 22px 16px;
@@ -1018,10 +1141,43 @@ watch(
   font-size: 13px; font-weight: 600; color: var(--ie-navy);
 }
 .ie-event-type-card i { font-size: 24px; color: var(--ie-red); }
-.ie-event-type-card:hover { border-color: var(--ie-navy); box-shadow: 0 8px 20px rgba(57, 73, 91, 0.12); transform: translateY(-2px); }
+@media (hover: hover) { .ie-event-type-card:hover { border-color: var(--ie-navy); box-shadow: 0 8px 20px rgba(57, 73, 91, 0.12); transform: translateY(-2px); } }
 @media (max-width: 700px) { .ie-event-type-grid { grid-template-columns: repeat(2, 1fr); } }
 
-.ie-catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; }
+.ie-catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 18px; }
+
+/* Barre de recherche des prestataires */
+.mpf { margin-bottom: 14px; border: 1px solid var(--ie-line); border-radius: 14px; background: #fff; box-shadow: var(--ie-shadow-sm); }
+.mpf-main { display: grid; grid-template-columns: minmax(0, 1fr) 180px 180px auto; gap: 10px; padding: 12px; }
+.mpf-search { min-width: 0 !important; }
+.mpf-select { width: 100%; }
+.mpf-toggle {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border: 1px solid var(--ie-line); border-radius: 8px;
+  background: #fff; color: var(--ie-navy); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+.mpf-toggle.active { border-color: var(--ie-navy); background: var(--ie-navy-soft); }
+.mpf-toggle span { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--ie-red); color: #fff; font-size: 11px; }
+.mpf-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 14px; align-items: end; padding: 14px 12px; border-top: 1px solid var(--ie-line); background: #fafbfc; border-radius: 0 0 14px 14px; }
+.mpf-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.mpf-field > span { color: var(--ie-muted); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.mpf-near { display: flex; gap: 6px; }
+.mpf-near .ie-btn { flex: 1; justify-content: center; white-space: nowrap; }
+.mpf-near .ie-btn.is-active { background: var(--ie-navy); color: #fff; border-color: var(--ie-navy); }
+.mpf-near .ie-select { flex: 1; min-width: 0; }
+.mpf-check { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--ie-ink); font-size: 13px; cursor: pointer; }
+.mpf-check input { width: 16px; height: 16px; accent-color: var(--ie-red); }
+.mpf-reset { justify-self: start; min-height: 40px; padding: 0; border: 0; background: none; color: var(--ie-red); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.mpf-count { margin: 0 0 12px; color: var(--ie-muted); font-size: 13px; }
+.mpf-count strong { color: var(--ie-navy); }
+@media (max-width: 900px) {
+  .mpf-main { grid-template-columns: 1fr 1fr; }
+  .mpf-search { grid-column: 1 / -1; }
+  .mpf-toggle { grid-column: 1 / -1; min-height: 40px; }
+}
+@media (max-width: 560px) {
+  .mpf-main { padding: 10px; gap: 8px; }
+  .mpf-panel { grid-template-columns: 1fr; padding: 12px 10px; }
+}
 .ie-sale-explainer {
   display: flex; align-items: flex-start; gap: 10px; background: var(--ie-navy-soft); border-radius: 10px;
   padding: 12px 16px; margin-bottom: 16px; font-size: 12.5px; color: var(--ie-navy); line-height: 1.55;
@@ -1060,7 +1216,10 @@ watch(
   border-color: #E8EAED; box-shadow: 0 1px 3px rgba(23, 27, 38, 0.06);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
-.ie-pro-card:hover { transform: translateY(-4px); box-shadow: 0 16px 32px rgba(23, 27, 38, 0.14); border-color: var(--ie-line); }
+@media (hover: hover) {
+  .ie-pro-card:hover { transform: translateY(-4px); box-shadow: 0 16px 32px rgba(23, 27, 38, 0.14); border-color: var(--ie-line); }
+}
+.ie-pro-card { border-radius: 16px; }
 .ie-pro-cover {
   height: 128px; flex-shrink: 0; position: relative; display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, #E4E9EF 0%, #EEF1F4 100%); border-bottom: 1px solid var(--ie-line);
@@ -1133,7 +1292,10 @@ watch(
 .ie-pro-meta { display: flex; gap: 14px; font-size: 12px; color: var(--ie-muted); margin: 6px 0 10px; }
 
 /* Carte prestataire « grand format » (catalogue principal) */
-.ie-pro-card-lg .ie-pro-cover { height: 190px; }
+.ie-pro-card-lg .ie-pro-cover { height: auto; aspect-ratio: 16 / 10; overflow: hidden; }
+.ie-pro-card-lg .ie-pro-cover img { position: absolute; inset: 0; }
+.ie-pro-card-lg .ie-pro-card-body { padding: 14px 16px 16px; }
+.ie-pro-card-lg .ie-pro-name { margin-top: 0; font-size: 15.5px; }
 .ie-pro-cover-actions { position: absolute; top: 9px; left: 9px; z-index: 2; display: flex; flex-direction: column; gap: 8px; }
 .ie-pro-icon-btn {
   width: 30px; height: 30px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.95);
@@ -1152,7 +1314,7 @@ watch(
 .ie-pro-rating-inline i { color: #F5A623; font-size: 12px; }
 .ie-pro-review-count { font-weight: 400; color: var(--ie-muted); }
 .ie-pro-divider { border: 0; border-top: 1px solid var(--ie-line); margin: 12px 0 10px; }
-.ie-pro-bottom-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+.ie-pro-bottom-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 10px; margin-top: auto; }
 .ie-pro-price-tag { font-size: 12.5px; color: var(--ie-muted); }
 .ie-pro-price-tag b, .ie-pro-price-tag { color: var(--ie-ink); }
 .ie-btn-contact {

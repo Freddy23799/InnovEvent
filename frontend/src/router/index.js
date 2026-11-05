@@ -161,6 +161,38 @@ const routes = [
         name: "premium-marketplace",
         component: () => import("../views/marketplace/PremiumMarketplaceView.vue"),
       },
+      // Boutique (Marketplace vente) : gratuite, ouverte à tous les comptes.
+      {
+        path: "boutique",
+        name: "sale-shop",
+        component: () => import("../views/shop/SaleShopView.vue"),
+      },
+      {
+        path: "boutique/produits/:id",
+        name: "sale-product",
+        component: () => import("../views/shop/SaleProductView.vue"),
+      },
+      {
+        path: "boutique/commande",
+        name: "sale-checkout",
+        component: () => import("../views/shop/SaleCheckoutView.vue"),
+      },
+      {
+        path: "boutique/commandes",
+        name: "sale-orders",
+        component: () => import("../views/shop/SaleOrdersView.vue"),
+      },
+      {
+        path: "boutique/locations",
+        name: "sale-rentals",
+        component: () => import("../views/shop/SaleRentalsView.vue"),
+        meta: { roles: ["admin"] },
+      },
+      {
+        path: "boutique/commandes/:id",
+        name: "sale-invoice",
+        component: () => import("../views/shop/SaleInvoiceView.vue"),
+      },
       {
         path: "premium-marketplace/manage",
         name: "premium-marketplace-manage",

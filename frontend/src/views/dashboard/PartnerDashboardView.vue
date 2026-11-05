@@ -1,17 +1,17 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import SubscriptionCheckoutModal from "../../components/SubscriptionCheckoutModal.vue";
 import { ACTOR_CATEGORY_GROUPS, OTHER_CATEGORY_GROUP } from "../../data/actorCategories";
 import { citiesForCountry, COUNTRIES, findCityCoords } from "../../data/countries";
 import { CLIENT_TYPES, INTERIOR_DESIGN_CATEGORY_GROUPS, INTERIOR_DESIGN_OTHER_CATEGORY_GROUP, PRICE_RANGES } from "../../data/interiorDesignCategories";
 import api from "../../services/api";
+import { useLightboxStore } from "../../stores/lightbox";
 import { useMarketplaceAccessStore } from "../../stores/marketplaceAccess";
 
 const ACTOR_PROVIDER_CATEGORY_GROUPS = [...ACTOR_CATEGORY_GROUPS, OTHER_CATEGORY_GROUP];
 const INTERIOR_PROVIDER_CATEGORY_GROUPS = [...INTERIOR_DESIGN_CATEGORY_GROUPS, INTERIOR_DESIGN_OTHER_CATEGORY_GROUP];
 
 const MARKETPLACE_TYPES = [
-  { value: "sale", label: "Marketplace vente", icon: "fa-solid fa-bag-shopping", hint: "Vous vendez des objets, du mobilier ou des équipements événementiels.", kind: "listing" },
   { value: "interior_design", label: "Décoration & design intérieur", icon: "fa-solid fa-couch", hint: "Vous proposez de la décoration ou du design d'intérieur.", kind: "profile" },
   { value: "actors", label: "Marketplace des acteurs", icon: "fa-solid fa-people-group", hint: "Vous êtes un professionnel de l'événementiel (DJ, traiteur, photographe...).", kind: "profile" },
 ];
@@ -98,10 +98,11 @@ const servicePhotoFile = ref(null);
 const showServiceForm = ref(false);
 const serviceSubmitting = ref(false);
 
-const portfolioFile = ref(null);
+const portfolioFiles = ref([]);
 const portfolioBeforeFile = ref(null);
 const portfolioCaption = ref("");
 const portfolioSubmitting = ref(false);
+const portfolioError = ref("");
 
 // --- Marketplace vente (annonce simple, inchangé) ---------------------------
 const listingForm = reactive({ marketplace_type: "sale", title: "", description: "", price: 0, currency: "XAF" });
@@ -207,26 +208,102 @@ async function removeService(service) {
   myProfile.value.services = myProfile.value.services.filter((s) => s.id !== service.id);
 }
 
-function onPortfolioChange(e) { portfolioFile.value = e.target.files[0] || null; }
+function onPortfolioChange(e) { portfolioFiles.value = Array.from(e.target.files || []); }
 function onPortfolioBeforeChange(e) { portfolioBeforeFile.value = e.target.files[0] || null; }
 
-async function addPortfolioItem() {
-  if (!portfolioFile.value) return;
+async function addPortfolioItems(event) {
+  if (!portfolioFiles.value.length) return;
   portfolioSubmitting.value = true;
+  let added = 0;
   try {
-    const payload = new FormData();
-    payload.append("profile", myProfile.value.id);
-    payload.append("caption", portfolioCaption.value);
-    payload.append("image", portfolioFile.value);
-    if (portfolioBeforeFile.value) payload.append("before_image", portfolioBeforeFile.value);
-    const { data } = await api.post("/marketplace/portfolio-items/", payload);
-    myProfile.value.portfolio_items.push(data);
-    portfolioFile.value = null;
+    // Un envoi par photo : une photo refusée n'empêche pas les autres. La
+    // photo « avant » ne s'applique que lorsqu'une seule photo « après » est
+    // choisie (une paire avant/après = une réalisation).
+    const withBefore = portfolioBeforeFile.value && portfolioFiles.value.length === 1;
+    for (const file of portfolioFiles.value) {
+      const payload = new FormData();
+      payload.append("profile", myProfile.value.id);
+      payload.append("caption", portfolioCaption.value);
+      payload.append("image", file);
+      if (withBefore) payload.append("before_image", portfolioBeforeFile.value);
+      try {
+        const { data } = await api.post("/marketplace/portfolio-items/", payload);
+        myProfile.value.portfolio_items.push(data);
+        added += 1;
+      } catch (e) {
+        portfolioError.value = `« ${file.name} » n'a pas pu être ajoutée.`;
+      }
+    }
+    if (added === portfolioFiles.value.length) portfolioError.value = "";
+    portfolioFiles.value = [];
     portfolioBeforeFile.value = null;
     portfolioCaption.value = "";
+    if (event?.target?.form) event.target.form.reset();
   } finally {
     portfolioSubmitting.value = false;
   }
+}
+
+const lightbox = useLightboxStore();
+function openPortfolio(index) {
+  lightbox.openGallery(myProfile.value.portfolio_items.map((p) => ({ url: p.image, caption: p.caption })), index);
+}
+
+// --- Complétude du profil (accueil) ------------------------------------------
+// Ce qui rend une fiche convaincante pour les clients, avec l'action qui
+// permet de le compléter directement depuis l'accueil.
+const MIN_PORTFOLIO = 3;
+const profileChecklist = computed(() => {
+  const p = myProfile.value;
+  if (!p) return [];
+  return [
+    { key: "cover", label: "Photo de couverture", done: Boolean(p.cover_photo), action: "profile" },
+    { key: "description", label: "Description de votre activité", done: Boolean(p.description?.trim()), action: "profile" },
+    { key: "specialties", label: "Spécialités", done: Boolean(p.specialties?.trim()), action: "profile" },
+    { key: "city", label: "Ville d'activité", done: Boolean(p.city), action: "profile" },
+    { key: "contact", label: "Téléphone professionnel", done: Boolean(p.contact_phone), action: "profile" },
+    { key: "services", label: "Au moins un service", done: p.services.length > 0, action: "service" },
+    {
+      key: "portfolio",
+      label: `Au moins ${MIN_PORTFOLIO} réalisations (${Math.min(p.portfolio_items.length, MIN_PORTFOLIO)}/${MIN_PORTFOLIO})`,
+      done: p.portfolio_items.length >= MIN_PORTFOLIO,
+      action: "portfolio",
+    },
+  ];
+});
+const profileCompletion = computed(() => {
+  const items = profileChecklist.value;
+  return items.length ? Math.round((items.filter((i) => i.done).length / items.length) * 100) : 0;
+});
+const missingChecklist = computed(() => profileChecklist.value.filter((i) => !i.done));
+
+// Certification : la CNI est facultative, mais c'est elle qui déclenche la
+// demande de vérification examinée par l'administration.
+const certification = computed(() => {
+  const p = myProfile.value;
+  if (!p) return null;
+  if (p.verification_status !== "not_verified") {
+    return { tone: "ok", icon: "fa-solid fa-circle-check", title: `Compte certifié · ${p.verification_status_display}`, text: "Ce badge est affiché sur votre fiche et inspire confiance aux clients." };
+  }
+  if (p.verification_requested_at) {
+    return { tone: "pending", icon: "fa-solid fa-hourglass-half", title: "Vérification en cours", text: "Votre CNI a bien été reçue. L'équipe InnovEvent examine votre profil pour le certifier." };
+  }
+  if (p.id_card_photo) {
+    return { tone: "idle", icon: "fa-solid fa-shield-halved", title: "Compte non certifié", text: "Votre demande n'a pas été validée. Envoyez une photo de CNI plus lisible pour relancer la vérification.", cta: "Renvoyer ma CNI" };
+  }
+  return { tone: "idle", icon: "fa-solid fa-shield-halved", title: "Faites certifier votre compte", text: "Facultatif : envoyez une photo de votre CNI. L'administration vérifie votre profil et vous attribue le badge « Vérifié ».", cta: "Ajouter ma CNI" };
+});
+
+async function completeItem(item) {
+  let target = "partner-profile-card";
+  if (item.action === "profile") showProfileForm.value = true;
+  if (item.action === "service") {
+    if (!showServiceForm.value) startCreateService();
+    target = "partner-services";
+  }
+  if (item.action === "portfolio") target = "partner-portfolio";
+  await nextTick();
+  document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function removePortfolioItem(item) {
@@ -327,7 +404,7 @@ onMounted(loadData);
         <textarea v-model="profileForm.description" class="ie-input" rows="3" placeholder="Présentez votre activité, votre expérience..."></textarea>
         <div class="ie-form-row" style="margin-top: 14px;">
           <div>
-            <label class="ie-label">Photo de profil</label>
+            <label class="ie-label">Photo de profil <span class="ie-optional">(facultatif)</span></label>
             <input type="file" accept="image/*" class="ie-input" @change="onLogoChange" />
             <p class="ie-field-hint">Le logo ou votre photo — affiché sur votre carte dans le marketplace.</p>
           </div>
@@ -400,7 +477,35 @@ onMounted(loadData);
 
     <!-- Profil professionnel déjà créé : édition + services + portfolio -->
     <template v-else-if="myProfile">
-      <div class="ie-card" style="overflow: hidden;">
+      <div v-if="certification" class="ie-certif" :class="certification.tone">
+        <span class="ie-certif-icon"><i :class="certification.icon"></i></span>
+        <div class="ie-certif-text">
+          <strong>{{ certification.title }}</strong>
+          <p>{{ certification.text }}</p>
+        </div>
+        <button v-if="certification.cta" type="button" class="ie-btn ie-btn-primary ie-btn-sm" @click="completeItem({ action: 'profile' })">
+          <i class="fa-solid fa-id-card"></i> {{ certification.cta }}
+        </button>
+      </div>
+
+      <div v-if="missingChecklist.length" class="ie-card ie-card-body ie-completion">
+        <div class="ie-completion-head">
+          <div class="ie-completion-ring" :style="{ '--pct': profileCompletion }"><span>{{ profileCompletion }}%</span></div>
+          <div>
+            <h2>Complétez votre profil</h2>
+            <p>Une fiche complète inspire confiance et reçoit plus de demandes de devis. Il vous reste {{ missingChecklist.length }} élément{{ missingChecklist.length > 1 ? "s" : "" }} à ajouter.</p>
+          </div>
+        </div>
+        <ul class="ie-completion-list">
+          <li v-for="item in profileChecklist" :key="item.key" :class="{ done: item.done }">
+            <i class="fa-solid" :class="item.done ? 'fa-circle-check' : 'fa-circle-plus'"></i>
+            <span>{{ item.label }}</span>
+            <button v-if="!item.done" type="button" class="ie-btn ie-btn-ghost ie-btn-sm" @click="completeItem(item)">Ajouter</button>
+          </li>
+        </ul>
+      </div>
+
+      <div id="partner-profile-card" class="ie-card" style="overflow: hidden;">
         <div v-if="!showProfileForm">
           <div class="ie-partner-cover" :class="{ 'has-photo': myProfile.cover_photo }">
             <img v-if="myProfile.cover_photo" v-img="myProfile.cover_photo" :alt="myProfile.business_name" />
@@ -516,7 +621,7 @@ onMounted(loadData);
           </div>
           <div class="ie-form-row" style="margin-top: 14px;">
             <div>
-              <label class="ie-label">Logo / photo de profil</label>
+              <label class="ie-label">Logo / photo de profil <span class="ie-optional">(facultatif)</span></label>
               <input type="file" accept="image/*" class="ie-input" @change="onLogoChange" />
             </div>
             <div>
@@ -525,16 +630,13 @@ onMounted(loadData);
             </div>
           </div>
           <label class="ie-label" style="margin-top: 14px;">
-            Photo de votre CNI <span class="ie-required">*</span>
+            Photo de votre CNI <span class="ie-optional">(facultatif — pour certifier votre compte)</span>
           </label>
           <input type="file" accept="image/*" class="ie-input" style="max-width: 320px;" @change="onIdCardChange" />
           <p class="ie-field-hint">
-            Vérification d'identité, à fournir une seule fois — jamais affichée publiquement sur votre fiche.
+            Envoyée à l'administration pour vérifier votre identité et certifier votre compte — jamais affichée publiquement sur votre fiche.
           </p>
           <img v-if="myProfile.id_card_photo && !idCardFile" :src="myProfile.id_card_photo" alt="CNI actuelle" class="ie-doc-thumb" />
-          <p v-else-if="!myProfile.id_card_photo" class="ie-alert ie-alert-warning" style="margin-top: 8px;">
-            <i class="fa-solid fa-triangle-exclamation"></i> Photo de CNI manquante.
-          </p>
           <p v-if="profileError" class="ie-alert ie-alert-danger" style="margin-top: 12px;">{{ profileError }}</p>
           <button class="ie-btn ie-btn-primary" type="submit" style="margin-top: 16px;" :disabled="profileSubmitting">
             {{ profileSubmitting ? "Enregistrement…" : "Mettre à jour" }}
@@ -543,7 +645,7 @@ onMounted(loadData);
       </div>
 
       <!-- Mes services -->
-      <div class="ie-card ie-card-body" style="margin-top: 20px;">
+      <div id="partner-services" class="ie-card ie-card-body" style="margin-top: 20px;">
         <div class="ie-page-header-actions" style="justify-content: space-between; margin-bottom: 16px;">
           <h2 style="margin: 0;">Mes services ({{ myProfile.services.length }})</h2>
           <button class="ie-btn ie-btn-primary ie-btn-sm" @click="showServiceForm ? (showServiceForm = false) : startCreateService()">
@@ -609,13 +711,13 @@ onMounted(loadData);
       </div>
 
       <!-- Mon portfolio -->
-      <div class="ie-card ie-card-body" style="margin-top: 20px;">
+      <div id="partner-portfolio" class="ie-card ie-card-body" style="margin-top: 20px;">
         <h2 style="margin-bottom: 16px;">Mon portfolio ({{ myProfile.portfolio_items.length }})</h2>
         <p v-if="profileForm.marketplace_type === 'interior_design'" class="ie-field-hint" style="margin: 0 0 12px;">
           Ajoutez une photo « avant » pour afficher un avant/après — très efficace pour valoriser vos réalisations.
         </p>
         <div class="ie-portfolio-grid">
-          <div v-for="p in myProfile.portfolio_items" :key="p.id" class="ie-portfolio-item">
+          <div v-for="(p, index) in myProfile.portfolio_items" :key="p.id" class="ie-portfolio-item" @click="openPortfolio(index)">
             <div v-if="p.before_image" class="ie-portfolio-before-after">
               <img v-img="p.before_image" alt="Avant" />
               <img v-img="p.image" :alt="p.caption" />
@@ -623,26 +725,28 @@ onMounted(loadData);
               <span class="ie-badge ie-badge-neutral ie-portfolio-ba-label ie-portfolio-ba-after">Après</span>
             </div>
             <img v-else v-img="p.image" :alt="p.caption" />
-            <button class="ie-portfolio-remove" @click="removePortfolioItem(p)"><i class="fa-solid fa-xmark"></i></button>
+            <button class="ie-portfolio-remove" @click.stop="removePortfolioItem(p)"><i class="fa-solid fa-xmark"></i></button>
           </div>
         </div>
-        <div class="ie-form-row" style="margin-top: 14px; align-items: flex-end;">
+        <form class="ie-form-row" style="margin-top: 14px; align-items: flex-end;" @submit.prevent>
           <div v-if="profileForm.marketplace_type === 'interior_design'">
             <label class="ie-label">Photo « avant » (optionnel)</label>
             <input type="file" accept="image/*" class="ie-input" @change="onPortfolioBeforeChange" />
           </div>
           <div>
-            <label class="ie-label">{{ portfolioBeforeFile ? "Photo « après »" : "Ajouter une photo" }}</label>
-            <input type="file" accept="image/*" class="ie-input" @change="onPortfolioChange" />
+            <label class="ie-label">{{ portfolioBeforeFile ? "Photo « après »" : "Ajouter des photos" }}</label>
+            <input type="file" accept="image/*" :multiple="!portfolioBeforeFile" class="ie-input" @change="onPortfolioChange" />
+            <p v-if="!portfolioBeforeFile" class="ie-field-hint">Vous pouvez sélectionner plusieurs photos à la fois.</p>
           </div>
           <div>
             <label class="ie-label">Légende (optionnel)</label>
             <input v-model="portfolioCaption" class="ie-input" />
           </div>
-          <button class="ie-btn ie-btn-primary ie-btn-sm" :disabled="!portfolioFile || portfolioSubmitting" @click="addPortfolioItem">
-            {{ portfolioSubmitting ? "Ajout…" : "Ajouter" }}
+          <button type="button" class="ie-btn ie-btn-primary ie-btn-sm" :disabled="!portfolioFiles.length || portfolioSubmitting" @click="addPortfolioItems">
+            {{ portfolioSubmitting ? "Ajout…" : portfolioFiles.length > 1 ? `Ajouter ${portfolioFiles.length} photos` : "Ajouter" }}
           </button>
-        </div>
+        </form>
+        <p v-if="portfolioError" class="ie-alert ie-alert-danger" style="margin-top: 12px;">{{ portfolioError }}</p>
       </div>
     </template>
 
@@ -661,6 +765,16 @@ onMounted(loadData);
 <style scoped>
 .ie-doc-thumb { width: 90px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid var(--ie-border); margin-top: 6px; }
 .ie-required { color: var(--ie-red); }
+.ie-optional { color: var(--ie-muted); font-weight: 500; font-size: 11.5px; }
+.ie-certif { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; padding: 16px 18px; border: 1px solid var(--ie-line); border-radius: 14px; background: #fff; }
+.ie-certif-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; background: var(--ie-navy-soft); color: var(--ie-navy); font-size: 18px; }
+.ie-certif.ok { border-color: #cfe7d9; background: var(--ie-success-soft); }
+.ie-certif.ok .ie-certif-icon { background: var(--ie-success); color: #fff; }
+.ie-certif.pending { border-color: #f0dcb0; background: var(--ie-warning-soft); }
+.ie-certif.pending .ie-certif-icon { background: var(--ie-warning); color: #fff; }
+.ie-certif-text { flex: 1; min-width: 0; }
+.ie-certif-text strong { color: var(--ie-navy); font-size: 14.5px; }
+.ie-certif-text p { margin: 3px 0 0; color: #4b5a6a; font-size: 13px; line-height: 1.45; }
 .ie-field-hint { font-size: 11.5px; color: var(--ie-muted); margin: 4px 0 0; }
 .ie-mp-choice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .ie-mp-choice-card { border: 1px solid var(--ie-line); border-radius: 12px; overflow: hidden; transition: border-color 0.2s ease; }
@@ -708,7 +822,29 @@ onMounted(loadData);
 .ie-service-info span { font-size: 12px; color: var(--ie-muted); }
 
 .ie-portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-.ie-portfolio-item { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; }
+.ie-portfolio-item { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: zoom-in; }
+
+.ie-completion { margin-bottom: 20px; border-left: 4px solid var(--ie-red); }
+.ie-completion-head { display: flex; align-items: center; gap: 16px; }
+.ie-completion-head h2 { margin: 0 0 4px; }
+.ie-completion-head p { margin: 0; color: var(--ie-muted); font-size: 13px; }
+.ie-completion-ring {
+  --pct: 0; flex: 0 0 64px; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--ie-red) calc(var(--pct) * 1%), #eef0f2 0);
+}
+.ie-completion-ring span {
+  width: 50px; height: 50px; border-radius: 50%; background: #fff; display: grid; place-items: center;
+  font-size: 13px; font-weight: 800; color: var(--ie-navy);
+}
+.ie-completion-list { list-style: none; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.ie-completion-list li {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--ie-line); border-radius: 8px;
+  font-size: 13px; color: var(--ie-navy); min-height: 44px;
+}
+.ie-completion-list li > i { color: var(--ie-red); }
+.ie-completion-list li span { flex: 1; min-width: 0; }
+.ie-completion-list li.done { color: var(--ie-muted); background: #fafbfc; }
+.ie-completion-list li.done > i { color: #28734f; }
 .ie-portfolio-item img { width: 100%; height: 100%; object-fit: cover; }
 .ie-portfolio-remove { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: rgba(23,27,38,0.7); color: #fff; border: 0; cursor: pointer; font-size: 11px; z-index: 2; }
 .ie-portfolio-before-after { position: relative; width: 100%; height: 100%; display: flex; }
@@ -719,6 +855,9 @@ onMounted(loadData);
 
 @media (max-width: 700px) {
   .ie-mp-choice-grid { grid-template-columns: 1fr; }
+  .ie-completion-list { grid-template-columns: 1fr; }
+  .ie-certif { flex-wrap: wrap; }
+  .ie-certif .ie-btn { width: 100%; justify-content: center; }
   .ie-partner-identity { flex-direction: column; }
   .ie-partner-cover-actions { flex-wrap: wrap; }
 }
