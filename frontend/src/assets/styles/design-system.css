@@ -19,6 +19,9 @@
   --ie-radius-lg: 16px;
   --ie-shadow-sm: 0 2px 6px rgba(57, 73, 91, 0.05);
   --ie-shadow: 0 10px 28px rgba(57, 73, 91, 0.07);
+  /* Bannières (marketplace, boutique, talents…) : bleu nuit uni, le rouge
+     restant réservé aux boutons et aux accents. */
+  --ie-hero-gradient: linear-gradient(125deg, #132131 0%, #1d3046 55%, #2a4560 100%);
 }
 
 *, *::before, *::after { box-sizing: border-box; }

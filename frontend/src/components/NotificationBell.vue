@@ -1,7 +1,8 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import api from "../services/api";
+import { enablePush, hasPushSubscription, isPushSupported, notificationPermission, setAppBadge, showLocalNotification } from "../services/push";
 import { useAuthStore } from "../stores/auth";
 
 const router = useRouter();
@@ -9,12 +10,17 @@ const auth = useAuthStore();
 const notifications = ref([]);
 const open = ref(false);
 const live = ref(false); // true dès que le flux temps réel (WebSocket) est connecté
+const pushState = ref(notificationPermission()); // granted | default | denied | unsupported
+const pushSubscribed = ref(false);
+const enabling = ref(false);
 let pollHandle = null;
 let socket = null;
 let reconnectTimer = null;
-let permissionAsked = false;
 
 const unreadCount = () => notifications.value.filter((n) => !n.is_read).length;
+
+// Le compteur de l'icône de l'application suit les non lues en temps réel.
+watch(() => unreadCount(), (count) => setAppBadge(count), { immediate: true });
 
 async function loadNotifications() {
   try {
@@ -38,6 +44,16 @@ function wsUrl() {
   return `${wsOrigin}/ws/notifications/?token=${encodeURIComponent(token)}`;
 }
 
+// Une notification arrive (WebSocket ou push au premier plan) : ajoutée à la
+// cloche et annoncée au reste de l'application (la messagerie se met à jour
+// immédiatement, sans attendre son propre rafraîchissement).
+function receive(notification) {
+  if (notification.id && !notifications.value.some((n) => n.id === notification.id)) {
+    notifications.value.unshift({ is_read: false, ...notification, message: notification.message ?? notification.body ?? "" });
+  }
+  window.dispatchEvent(new CustomEvent("ie:notification", { detail: notification }));
+}
+
 function connectRealtime() {
   const url = wsUrl();
   if (!url) return;
@@ -48,10 +64,10 @@ function connectRealtime() {
   socket.onmessage = (event) => {
     try {
       const notification = JSON.parse(event.data);
-      if (!notifications.value.some((n) => n.id === notification.id)) {
-        notifications.value.unshift(notification);
-      }
-      notifyBrowser(notification);
+      receive(notification);
+      // Sans abonnement push, l'application affiche elle-même l'alerte
+      // système quand elle est en arrière-plan (le push s'en charge sinon).
+      if (document.hidden && !pushSubscribed.value) showLocalNotification(notification);
     } catch (e) {
       // ignore un message mal formé
     }
@@ -60,9 +76,10 @@ function connectRealtime() {
   socket.onclose = () => {
     live.value = false;
     socket = null;
-    // Reconnexion automatique (ex: réseau coupé, backend redémarré) tant que le
-    // composant est monté et l'utilisateur toujours connecté.
-    reconnectTimer = setTimeout(() => {
+    // Reconnexion automatique (réseau coupé, backend redémarré, jeton
+    // expiré) : une requête API préalable renouvelle la session si besoin.
+    reconnectTimer = setTimeout(async () => {
+      await loadNotifications();
       if (auth.accessToken) connectRealtime();
     }, 4000);
   };
@@ -70,23 +87,35 @@ function connectRealtime() {
   socket.onerror = () => socket?.close();
 }
 
-function notifyBrowser(notification) {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  new Notification(notification.title || "InnovEvent", {
-    body: notification.message || "",
-    icon: "/favicon.png",
-  });
+async function activatePush() {
+  enabling.value = true;
+  try {
+    const result = await enablePush({ ask: true });
+    pushState.value = notificationPermission();
+    pushSubscribed.value = result === "granted";
+  } catch (e) {
+    pushSubscribed.value = false;
+  } finally {
+    enabling.value = false;
+  }
 }
 
-function ensureNotificationPermission() {
-  if (permissionAsked || typeof Notification === "undefined") return;
-  permissionAsked = true;
-  if (Notification.permission === "default") Notification.requestPermission();
+function onServiceWorkerMessage(event) {
+  if (event.data?.type === "ie-push") {
+    receive(event.data.notification);
+    loadNotifications();
+  } else if (event.data?.type === "ie-navigate" && event.data.link) {
+    router.push(event.data.link);
+  }
+}
+
+function onPushActivated() {
+  pushState.value = notificationPermission();
+  hasPushSubscription().then((value) => { pushSubscribed.value = value; });
 }
 
 async function toggle() {
   open.value = !open.value;
-  if (open.value) ensureNotificationPermission();
 }
 
 async function openNotification(notification) {
@@ -107,19 +136,29 @@ function closeOnOutsideClick(e) {
   if (!e.target.closest(".ie-bell-wrap")) open.value = false;
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadNotifications();
   if (auth.accessToken) connectRealtime();
   // Filet de sécurité si le WebSocket est indisponible (proxy, réseau restrictif...) :
   // rafraîchissement périodique bien plus espacé, le temps réel étant assuré par la WS.
   pollHandle = setInterval(loadNotifications, 60000);
   document.addEventListener("click", closeOnOutsideClick);
+  window.addEventListener("ie:push-activated", onPushActivated);
+  if (isPushSupported()) {
+    navigator.serviceWorker.addEventListener("message", onServiceWorkerMessage);
+    // Autorisation déjà donnée : l'appareil est (ré)enregistré en silence.
+    if (pushState.value === "granted") {
+      pushSubscribed.value = (await enablePush().catch(() => "error")) === "granted";
+    }
+  }
 });
 onBeforeUnmount(() => {
   if (pollHandle) clearInterval(pollHandle);
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (socket) { socket.onclose = null; socket.close(); }
   document.removeEventListener("click", closeOnOutsideClick);
+  window.removeEventListener("ie:push-activated", onPushActivated);
+  if (isPushSupported()) navigator.serviceWorker.removeEventListener("message", onServiceWorkerMessage);
 });
 </script>
 
@@ -134,6 +173,15 @@ onBeforeUnmount(() => {
       <div class="ie-bell-header">
         <strong>Notifications</strong>
         <button class="ie-bell-markall" @click="markAllRead">Tout marquer comme lu</button>
+      </div>
+      <div v-if="pushState !== 'unsupported' && !pushSubscribed" class="ie-bell-push">
+        <i class="fa-solid fa-mobile-screen-button"></i>
+        <div>
+          <strong>Recevez les alertes sur cet appareil</strong>
+          <small v-if="pushState === 'denied'">Notifications bloquées : autorisez-les dans les réglages du navigateur.</small>
+          <small v-else>Messages, commandes, devis… même application fermée.</small>
+        </div>
+        <button v-if="pushState !== 'denied'" type="button" :disabled="enabling" @click.stop="activatePush">{{ enabling ? "…" : "Activer" }}</button>
       </div>
       <div class="ie-bell-list">
         <button
@@ -175,6 +223,12 @@ onBeforeUnmount(() => {
   box-shadow: var(--ie-shadow); z-index: 50; overflow: hidden; display: flex; flex-direction: column;
 }
 .ie-bell-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--ie-line); font-size: 13px; }
+.ie-bell-push { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--ie-line); background: var(--ie-navy-soft); }
+.ie-bell-push > i { color: var(--ie-navy); font-size: 16px; }
+.ie-bell-push div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ie-bell-push strong { color: var(--ie-navy); font-size: 12px; }
+.ie-bell-push small { color: var(--ie-muted); font-size: 11px; line-height: 1.35; }
+.ie-bell-push button { flex-shrink: 0; padding: 6px 10px; border: 0; border-radius: 8px; background: var(--ie-red); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
 .ie-bell-markall { background: none; border: 0; color: var(--ie-red); font-size: 11.5px; font-weight: 700; cursor: pointer; }
 .ie-bell-list { overflow-y: auto; max-height: 360px; }
 .ie-bell-item { display: block; width: 100%; text-align: left; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--ie-line); background: #fff; cursor: pointer; }

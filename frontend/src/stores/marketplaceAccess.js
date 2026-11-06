@@ -14,6 +14,9 @@ export const useMarketplaceAccessStore = defineStore("marketplaceAccess", {
     actorsFeatures: [],
     marketplaces: [],
     loaded: false,
+    // Demande d'ouverture de la sidebar sur la section d'un marketplace
+    // (après un abonnement, ou « Explorer ») — lue par DashboardLayout.
+    reveal: { type: null, token: 0 },
   }),
   getters: {
     activeProfileSubscriptionTypes(state) {
@@ -36,6 +39,9 @@ export const useMarketplaceAccessStore = defineStore("marketplaceAccess", {
     },
   },
   actions: {
+    revealInSidebar(type) {
+      this.reveal = { type, token: this.reveal.token + 1 };
+    },
     async refresh() {
       try {
         this.actorsFeatures = await fetchMarketplaceFeatures("actors");

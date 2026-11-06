@@ -3,9 +3,11 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     CommissionSettingsViewSet,
+    CartSnapshotView,
     MarketplaceAnalyticsView,
     MarketplaceFeatureResolveView,
     MarketplaceFeatureViewSet,
+    MarketplaceListingPhotoViewSet,
     MarketplaceListingViewSet,
     MarketplaceOrderPaymentView,
     MarketplaceOrderViewSet,
@@ -17,12 +19,15 @@ from .views import (
     ProfessionalProfileViewSet,
     ProfessionalServiceViewSet,
     QuoteViewSet,
+    SaleOrderViewSet,
     SubscriptionPlanViewSet,
     SubscriptionTierViewSet,
 )
 
 router = DefaultRouter()
 router.register("listings", MarketplaceListingViewSet, basename="marketplace-listings")
+router.register("listing-photos", MarketplaceListingPhotoViewSet, basename="marketplace-listing-photos")
+router.register("sale-orders", SaleOrderViewSet, basename="marketplace-sale-orders")
 router.register("orders", MarketplaceOrderViewSet, basename="marketplace-orders")
 router.register("profiles", ProfessionalProfileViewSet, basename="professional-profiles")
 router.register("services", ProfessionalServiceViewSet, basename="professional-services")
@@ -38,6 +43,7 @@ router.register("features", MarketplaceFeatureViewSet, basename="marketplace-fea
 
 urlpatterns = [
     path("orders/pay/", MarketplaceOrderPaymentView.as_view(), name="marketplace-order-pay"),
+    path("cart/", CartSnapshotView.as_view(), name="marketplace-cart"),
     path("subscriptions/", MarketplaceSubscriptionView.as_view(), name="marketplace-subscriptions"),
     path("features/resolve/", MarketplaceFeatureResolveView.as_view(), name="marketplace-features-resolve"),
     path("analytics/", MarketplaceAnalyticsView.as_view(), name="marketplace-analytics"),

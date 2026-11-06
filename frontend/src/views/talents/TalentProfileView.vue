@@ -1,11 +1,19 @@
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
 import SubscriptionCheckoutModal from "../../components/SubscriptionCheckoutModal.vue";
+import { citiesForCountry } from "../../data/countries";
 import api from "../../services/api";
+import { useLightboxStore } from "../../stores/lightbox";
 import { useToastStore } from "../../stores/toast";
 
 const toast = useToastStore();
+const lightbox = useLightboxStore();
+
+// Villes proposées dans une liste plutôt qu'en saisie libre : des noms
+// homogènes (« Yaoundé » et non « yaounde ») pour que le filtre par ville de
+// l'annuaire retrouve bien les talents.
+const CITY_NAMES = citiesForCountry("CM").map((c) => c.name);
 
 const loading = ref(true);
 const notFound = ref(false);
@@ -15,7 +23,7 @@ const errorMessage = ref("");
 const currentPhoto = ref("");
 const photoFile = ref(null);
 const portfolioItems = ref([]);
-const portfolioFile = ref(null);
+const portfolioFiles = ref([]);
 const portfolioCaption = ref("");
 const uploadingPortfolio = ref(false);
 
@@ -28,6 +36,8 @@ const form = reactive({
   full_name: "", formation: "", competences: "", experience: "", city: "", disponibilite: "to_define", opportunity_type: "one_off",
 });
 const verificationStatus = ref("not_verified");
+// Une ville saisie avant l'introduction de la liste reste sélectionnable.
+const cityOptions = computed(() => (form.city && !CITY_NAMES.includes(form.city) ? [form.city, ...CITY_NAMES] : CITY_NAMES));
 
 // Visibilité côté prestataires : le profil n'apparaît dans leur annuaire
 // qu'une fois complet et l'abonnement « Visibilité talent » payé.
@@ -107,23 +117,42 @@ async function submitForm() {
   }
 }
 
-async function addPortfolioItem() {
-  if (!portfolioFile.value) return;
+function onPortfolioFilesChange(event) {
+  portfolioFiles.value = Array.from(event.target.files || []);
+}
+
+async function addPortfolioItems(event) {
+  if (!portfolioFiles.value.length) return;
   uploadingPortfolio.value = true;
+  let added = 0;
   try {
-    const payload = new FormData();
-    payload.append("profile", talentId.value);
-    payload.append("image", portfolioFile.value);
-    payload.append("caption", portfolioCaption.value);
-    const { data } = await api.post("/talents/portfolio/", payload);
-    portfolioItems.value.unshift(data);
-    portfolioFile.value = null;
+    // Un envoi par image : une image refusée (format, taille) n'empêche pas
+    // les autres d'être ajoutées.
+    for (const file of portfolioFiles.value) {
+      const payload = new FormData();
+      payload.append("profile", talentId.value);
+      payload.append("image", file);
+      payload.append("caption", portfolioCaption.value);
+      try {
+        const { data } = await api.post("/talents/portfolio/", payload);
+        portfolioItems.value.unshift(data);
+        added += 1;
+      } catch (e) {
+        toast.error(`« ${file.name} » n'a pas pu être ajoutée.`);
+      }
+    }
+    if (added) toast.success(added > 1 ? `${added} images ajoutées au portfolio.` : "Image ajoutée au portfolio.");
+    portfolioFiles.value = [];
     portfolioCaption.value = "";
-    toast.success("Élément de portfolio ajouté.");
+    if (event?.target?.form) event.target.form.reset();
     await refreshVisibility();
   } finally {
     uploadingPortfolio.value = false;
   }
+}
+
+function openPortfolio(index) {
+  lightbox.openGallery(portfolioItems.value.map((item) => ({ url: item.image, caption: item.caption })), index);
 }
 
 async function removePortfolioItem(item) {
@@ -187,7 +216,10 @@ onMounted(loadData);
             </div>
             <div>
               <label class="ie-label">Ville</label>
-              <input v-model="form.city" class="ie-input" />
+              <select v-model="form.city" class="ie-select">
+                <option value="">Choisir une ville</option>
+                <option v-for="city in cityOptions" :key="city" :value="city">{{ city }}</option>
+              </select>
             </div>
           </div>
           <label class="ie-label" style="margin-top: 14px;">Formation</label>
@@ -231,24 +263,28 @@ onMounted(loadData);
       <div class="ie-card ie-card-body" style="margin-top: 16px;">
         <h3 class="ie-doc-section-title">Mes réalisations</h3>
         <div class="ie-portfolio-grid">
-          <div v-for="item in portfolioItems" :key="item.id" class="ie-portfolio-item">
-            <img v-img="item.image" :alt="item.caption" />
+          <div v-for="(item, index) in portfolioItems" :key="item.id" class="ie-portfolio-item">
+            <img v-img="item.image" :alt="item.caption" @click="openPortfolio(index)" />
             <button type="button" class="ie-portfolio-remove" @click="removePortfolioItem(item)"><i class="fa-solid fa-xmark"></i></button>
           </div>
         </div>
-        <div class="ie-form-row" style="margin-top: 12px;">
-          <div>
-            <label class="ie-label">Image</label>
-            <input type="file" accept="image/*" class="ie-input" @change="portfolioFile = $event.target.files[0] || null" />
+        <form @submit.prevent>
+          <div class="ie-form-row" style="margin-top: 12px;">
+            <div>
+              <label class="ie-label">Images</label>
+              <input type="file" accept="image/*" multiple class="ie-input" @change="onPortfolioFilesChange" />
+              <p class="ie-field-hint">Vous pouvez sélectionner plusieurs images à la fois.</p>
+            </div>
+            <div>
+              <label class="ie-label">Légende (optionnel)</label>
+              <input v-model="portfolioCaption" class="ie-input" />
+            </div>
           </div>
-          <div>
-            <label class="ie-label">Légende (optionnel)</label>
-            <input v-model="portfolioCaption" class="ie-input" />
-          </div>
-        </div>
-        <button class="ie-btn ie-btn-ghost ie-btn-sm" style="margin-top: 10px;" :disabled="!portfolioFile || uploadingPortfolio" @click="addPortfolioItem">
-          <i class="fa-solid fa-plus"></i> Ajouter au portfolio
-        </button>
+          <button type="button" class="ie-btn ie-btn-ghost ie-btn-sm" style="margin-top: 10px;" :disabled="!portfolioFiles.length || uploadingPortfolio" @click="addPortfolioItems">
+            <i class="fa-solid fa-plus"></i>
+            {{ uploadingPortfolio ? "Ajout…" : portfolioFiles.length > 1 ? `Ajouter ces ${portfolioFiles.length} images` : "Ajouter au portfolio" }}
+          </button>
+        </form>
       </div>
     </template>
 
@@ -277,7 +313,8 @@ onMounted(loadData);
 .ie-doc-thumb { width: 90px; height: 90px; object-fit: cover; border-radius: 8px; border: 1px solid var(--ie-border); margin-top: 8px; }
 .ie-portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
 .ie-portfolio-item { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--ie-border); }
-.ie-portfolio-item img { width: 100%; height: 100%; object-fit: cover; }
+.ie-portfolio-item img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.ie-field-hint { font-size: 11.5px; color: var(--ie-muted); margin: 4px 0 0; }
 .ie-portfolio-remove {
   position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; border: 0;
   background: rgba(0, 0, 0, 0.6); color: #fff; cursor: pointer; font-size: 11px;

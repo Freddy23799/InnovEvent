@@ -109,7 +109,10 @@ class ConversationSerializer(serializers.ModelSerializer):
 
     def get_participants(self, obj):
         return [
-            {"id": u.id, "name": u.get_full_name() or u.username, "is_online": u.is_online()}
+            {
+                "id": u.id, "name": u.get_full_name() or u.username, "is_online": u.is_online(),
+                "role": u.role, "role_label": u.get_role_display(),
+            }
             for u in obj.participants.all()
         ]
 

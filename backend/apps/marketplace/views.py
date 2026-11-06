@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import User
+from apps.equipment.models import Equipment, StockMovement
 from apps.accounts.permissions import IsAdmin, IsAdminOrPublicReadOnly
 from apps.messaging.models import Conversation
 from apps.notifications.services import (
@@ -26,6 +27,10 @@ from apps.notifications.services import (
     notify_quote_client_response,
     notify_quote_paid,
     notify_quote_sent,
+    notify_sale_order_created,
+    notify_sale_order_update,
+    notify_verification_requested,
+    notify_verification_status_changed,
 )
 from apps.payments.gateways import PaymentGatewayError, get_effective_provider, get_gateway
 from apps.payments.idempotency import idempotent_payment
@@ -38,6 +43,7 @@ from .models import (
     CommissionSettings,
     MarketplaceFeature,
     MarketplaceListing,
+    MarketplaceListingPhoto,
     MarketplaceOrder,
     MarketplaceSubscription,
     MarketplaceType,
@@ -47,17 +53,22 @@ from .models import (
     ProfessionalPortfolioItem,
     ProfessionalProfile,
     ProfessionalService,
+    CartSnapshot,
     Quote,
+    SaleOrder,
+    SaleOrderItem,
     SubscriptionPlan,
     SubscriptionTier,
 )
-from .pdf import build_quote_pdf
+from .pdf import build_quote_pdf, build_sale_invoice_pdf
+from .shop import available_for_rent, available_for_sale
 from .serializers import (
     AdminBookingRequestUpdateSerializer,
     AdminCreateProfileSerializer,
     ClientQuoteActionSerializer,
     CommissionSettingsSerializer,
     MarketplaceFeatureSerializer,
+    MarketplaceListingPhotoSerializer,
     MarketplaceListingSerializer,
     MarketplaceOrderPaymentSerializer,
     MarketplaceOrderSerializer,
@@ -75,6 +86,10 @@ from .serializers import (
     QuotePaymentSerializer,
     QuoteSerializer,
     ResolvedFeatureSerializer,
+    RentalReturnLineSerializer,
+    SaleCartSerializer,
+    SaleOrderCreateSerializer,
+    SaleOrderSerializer,
     SubscribeSerializer,
     SubscriptionPlanSerializer,
     SubscriptionTierSerializer,
@@ -161,14 +176,15 @@ class MarketplaceListingViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        qs = MarketplaceListing.objects.select_related("provider", "created_by")
+        qs = MarketplaceListing.objects.select_related("provider", "created_by").prefetch_related("photos")
         user = self.request.user
         if user.is_authenticated and user.is_admin_role:
             return qs
-        # Accès libre (« mode client simple », ex. Marketplace vente) : visible par
-        # tout client connecté sans abonnement. Sinon, seul un abonnement actif au
-        # marketplace précis de l'annonce donne accès.
-        free_access = Q(is_active=True, requires_subscription=False)
+        # Accès libre (« mode client simple ») : visible par tout client connecté
+        # sans abonnement — toujours le cas de la boutique (Marketplace vente),
+        # entièrement gratuite. Sinon, seul un abonnement actif au marketplace
+        # précis de l'annonce donne accès.
+        free_access = Q(is_active=True, requires_subscription=False) | Q(is_active=True, marketplace_type=MarketplaceType.SALE)
         subscribed = active_subscription_types(user)
         gated_access = Q(is_active=True, requires_subscription=True, marketplace_type__in=subscribed) if subscribed else Q(pk__in=[])
         visible = free_access | gated_access
@@ -187,11 +203,308 @@ class MarketplaceListingViewSet(viewsets.ModelViewSet):
         if user.is_admin_role:
             serializer.save(is_active=True)
             return
+        if marketplace_type == MarketplaceType.SALE:
+            raise ValidationError({"marketplace_type": "Les produits de la boutique sont publiés uniquement par InnovEvent."})
         if not has_active_subscription(user, marketplace_type):
             raise ValidationError({
                 "marketplace_type": "Un abonnement actif à ce marketplace est requis pour y publier une annonce."
             })
         serializer.save(created_by=user, is_active=True)
+
+
+class MarketplaceListingPhotoViewSet(viewsets.ModelViewSet):
+    """Photos supplémentaires des produits de la boutique — gérées par
+    l'administration (seule InnovEvent publie dans la boutique)."""
+
+    serializer_class = MarketplaceListingPhotoSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["listing"]
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsAdmin()]
+
+    def get_queryset(self):
+        return MarketplaceListingPhoto.objects.all()
+
+
+class SaleOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """Commandes panier de la boutique, à l'achat ou à la location sur une
+    période. Le client crée sa commande (facture « À payer », sans paiement en
+    ligne) et la consulte ; l'administration voit toutes les commandes, change
+    le statut de paiement et suit chaque location (sortie, retour, casse)."""
+
+    serializer_class = SaleOrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["status", "order_type", "rental_status"]
+
+    def get_queryset(self):
+        qs = SaleOrder.objects.select_related("buyer").prefetch_related("items__listing")
+        if not self.request.user.is_admin_role:
+            qs = qs.filter(buyer=self.request.user)
+        # Planning des locations : à venir / en cours / terminées.
+        period = self.request.query_params.get("period")
+        today = timezone.localdate()
+        if period == "upcoming":
+            qs = qs.filter(rental_start__gt=today).exclude(status=SaleOrder.Status.CANCELLED)
+        elif period == "ongoing":
+            qs = qs.filter(rental_start__lte=today, rental_status__in=[SaleOrder.RentalStatus.RESERVED, SaleOrder.RentalStatus.OUT]).exclude(status=SaleOrder.Status.CANCELLED)
+        elif period == "closed":
+            qs = qs.filter(Q(rental_status=SaleOrder.RentalStatus.RETURNED) | Q(status=SaleOrder.Status.CANCELLED))
+        if self.request.query_params.get("order_type") == SaleOrder.OrderType.RENTAL and period in ("upcoming", "ongoing"):
+            qs = qs.order_by("rental_start", "created_at")
+        return qs
+
+    def _serialize(self, order):
+        order = self.get_queryset().model.objects.select_related("buyer").prefetch_related("items__listing").get(pk=order.pk)
+        return SaleOrderSerializer(order, context={"request": self.request}).data
+
+    @staticmethod
+    def _availability(listing, data):
+        if data["order_type"] == SaleOrder.OrderType.RENTAL:
+            return available_for_rent(listing, data["rental_start"], data["rental_end"])
+        return available_for_sale(listing)
+
+    @action(detail=False, methods=["post"], url_path="check-availability")
+    def check_availability(self, request):
+        """Vérifie le panier pour le mode choisi (et la période, en location),
+        sans rien réserver — affiché en direct sur la page de commande."""
+        serializer = SaleCartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        lines = []
+        for line in data["items"]:
+            available = self._availability(line["listing"], data)
+            lines.append({
+                "listing": line["listing"].pk,
+                "requested": line["quantity"],
+                "available": available,
+                "ok": available is None or available >= line["quantity"],
+            })
+        return Response({"lines": lines, "ok": all(line["ok"] for line in lines)})
+
+    def create(self, request):
+        serializer = SaleOrderCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        quantities = {line["listing"].pk: line["quantity"] for line in data["items"]}
+        is_rental = data["order_type"] == SaleOrder.OrderType.RENTAL
+        days = (data["rental_end"] - data["rental_start"]).days + 1 if is_rental else 1
+
+        with transaction.atomic():
+            # Verrou sur les produits (et leur article d'inventaire) : deux
+            # commandes simultanées ne peuvent pas prendre les mêmes pièces.
+            listings = {
+                listing.pk: listing
+                for listing in MarketplaceListing.objects.select_for_update(of=("self",)).select_related("equipment").filter(
+                    pk__in=quantities, is_active=True, marketplace_type=MarketplaceType.SALE,
+                )
+            }
+            equipment_ids = [listing.equipment_id for listing in listings.values() if listing.equipment_id]
+            if equipment_ids:
+                list(Equipment.objects.select_for_update().filter(pk__in=equipment_ids))
+
+            unavailable = []
+            for listing_id, quantity in quantities.items():
+                listing = listings.get(listing_id)
+                if listing is None:
+                    unavailable.append("un produit n'est plus disponible")
+                    continue
+                available = self._availability(listing, data)
+                if available is not None and available < quantity:
+                    unavailable.append(f"« {listing.title} » : {available} pièce(s) disponible(s)")
+            if unavailable:
+                detail = "Stock insuffisant sur cette période — " if is_rental else "Stock insuffisant — "
+                return Response({"detail": detail + " ; ".join(unavailable) + "."}, status=status.HTTP_409_CONFLICT)
+
+            first = next(iter(listings.values()))
+            order = SaleOrder.objects.create(
+                buyer=request.user,
+                currency=first.currency,
+                order_type=data["order_type"],
+                rental_start=data["rental_start"],
+                rental_end=data["rental_end"],
+                rental_days=days if is_rental else None,
+                rental_status=SaleOrder.RentalStatus.RESERVED if is_rental else "",
+                delivery_name=data["delivery_name"],
+                delivery_phone=data["delivery_phone"],
+                delivery_city=data["delivery_city"],
+                delivery_address=data["delivery_address"],
+                notes=data.get("notes", ""),
+            )
+            total = Decimal("0")
+            for listing_id, quantity in quantities.items():
+                listing = listings[listing_id]
+                unit_price = listing.rental_price if is_rental else listing.price
+                line_total = unit_price * quantity * days
+                total += line_total
+                SaleOrderItem.objects.create(
+                    order=order, listing=listing, title=listing.title,
+                    unit_price=unit_price, quantity=quantity, days=days, line_total=line_total,
+                )
+                if not is_rental:
+                    # Une vente sort définitivement les pièces du stock. Une
+                    # location ne fait que les réserver sur sa période.
+                    self._remove_from_stock(listing, quantity, StockMovement.Reason.SALE, f"Vente boutique — {order.number}")
+            order.total = total
+            order.save(update_fields=["total"])
+            # Le panier est commandé : plus de relance « panier abandonné ».
+            CartSnapshot.objects.filter(user=request.user).delete()
+            notify_sale_order_created(order)
+
+        return Response(self._serialize(order), status=status.HTTP_201_CREATED)
+
+    def _remove_from_stock(self, listing, quantity, reason, notes):
+        if listing.equipment_id:
+            StockMovement.objects.create(
+                equipment_id=listing.equipment_id, movement_type=StockMovement.MovementType.OUT,
+                reason=reason, quantity=quantity, notes=notes, recorded_by=self.request.user,
+            )
+        elif listing.stock is not None:
+            MarketplaceListing.objects.filter(pk=listing.pk).update(stock=Greatest(F("stock") - quantity, Value(0)))
+
+    def _return_to_stock(self, listing, quantity, notes):
+        if listing.equipment_id:
+            StockMovement.objects.create(
+                equipment_id=listing.equipment_id, movement_type=StockMovement.MovementType.IN,
+                reason=StockMovement.Reason.RETURN, quantity=quantity, notes=notes, recorded_by=self.request.user,
+            )
+        elif listing.stock is not None:
+            MarketplaceListing.objects.filter(pk=listing.pk).update(stock=F("stock") + quantity)
+
+    def _require_admin(self):
+        if not self.request.user.is_admin_role:
+            raise PermissionDenied("Action réservée à l'administration.")
+
+    @action(detail=True, methods=["post"], url_path="set-status")
+    def set_status(self, request, pk=None):
+        self._require_admin()
+        new_status = request.data.get("status")
+        if new_status not in SaleOrder.Status.values:
+            return Response({"detail": "Statut inconnu."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            order = SaleOrder.objects.select_for_update().get(pk=self.get_object().pk)
+            if order.status == SaleOrder.Status.CANCELLED and new_status != SaleOrder.Status.CANCELLED:
+                return Response({"detail": "Une commande annulée ne peut pas être réactivée."}, status=status.HTTP_400_BAD_REQUEST)
+            if new_status == SaleOrder.Status.CANCELLED and order.status != SaleOrder.Status.CANCELLED:
+                if order.order_type == SaleOrder.OrderType.RENTAL and order.rental_status != SaleOrder.RentalStatus.RESERVED:
+                    return Response(
+                        {"detail": "Le matériel de cette location est déjà sorti : enregistrez d'abord son retour."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if order.order_type == SaleOrder.OrderType.PURCHASE:
+                    # Les pièces vendues reviennent en stock.
+                    for item in order.items.select_related("listing"):
+                        if item.listing:
+                            self._return_to_stock(item.listing, item.quantity, f"Annulation de la commande {order.number}")
+            previous_status = order.status
+            order.status = new_status
+            order.paid_at = timezone.now() if new_status == SaleOrder.Status.PAID else None
+            order.save(update_fields=["status", "paid_at", "updated_at"])
+            if new_status != previous_status:
+                notify_sale_order_update(order, new_status)
+        return Response(self._serialize(order))
+
+    @action(detail=True, methods=["post"], url_path="mark-out")
+    def mark_out(self, request, pk=None):
+        """Le matériel loué quitte l'entrepôt (livraison ou retrait)."""
+        self._require_admin()
+        order = self.get_object()
+        if order.order_type != SaleOrder.OrderType.RENTAL or order.rental_status != SaleOrder.RentalStatus.RESERVED or order.status == SaleOrder.Status.CANCELLED:
+            return Response({"detail": "Seule une location réservée peut être marquée comme sortie."}, status=status.HTTP_400_BAD_REQUEST)
+        order.rental_status = SaleOrder.RentalStatus.OUT
+        order.out_at = timezone.now()
+        order.save(update_fields=["rental_status", "out_at", "updated_at"])
+        notify_sale_order_update(order, "out")
+        return Response(self._serialize(order))
+
+    @action(detail=True, methods=["post"], url_path="mark-returned")
+    def mark_returned(self, request, pk=None):
+        """Retour du matériel loué : les pièces abîmées ou perdues sont
+        sorties définitivement du stock (mouvement « Endommagé » / « Perdu »)."""
+        self._require_admin()
+        lines = RentalReturnLineSerializer(data=request.data.get("items", []), many=True)
+        lines.is_valid(raise_exception=True)
+        with transaction.atomic():
+            order = SaleOrder.objects.select_for_update().get(pk=self.get_object().pk)
+            if order.order_type != SaleOrder.OrderType.RENTAL or order.rental_status != SaleOrder.RentalStatus.OUT:
+                return Response({"detail": "Seule une location sortie peut être retournée."}, status=status.HTTP_400_BAD_REQUEST)
+            items = {item.pk: item for item in order.items.select_related("listing")}
+            for line in lines.validated_data:
+                item = items.get(line["item"])
+                if item is None:
+                    return Response({"detail": "Ligne de commande inconnue."}, status=status.HTTP_400_BAD_REQUEST)
+                if line["damaged_quantity"] + line["lost_quantity"] > item.quantity:
+                    return Response(
+                        {"detail": f"« {item.title} » : pas plus de {item.quantity} pièce(s) abîmée(s) ou perdue(s)."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                item.damaged_quantity = line["damaged_quantity"]
+                item.lost_quantity = line["lost_quantity"]
+                item.save(update_fields=["damaged_quantity", "lost_quantity"])
+                if item.listing:
+                    note = f"Retour de location {order.number} ({order.delivery_name})"
+                    if item.damaged_quantity:
+                        self._remove_from_stock(item.listing, item.damaged_quantity, StockMovement.Reason.DAMAGE, note)
+                    if item.lost_quantity:
+                        self._remove_from_stock(item.listing, item.lost_quantity, StockMovement.Reason.LOSS, note)
+            order.rental_status = SaleOrder.RentalStatus.RETURNED
+            order.returned_at = timezone.now()
+            order.return_notes = request.data.get("notes", "") or ""
+            order.save(update_fields=["rental_status", "returned_at", "return_notes", "updated_at"])
+            notify_sale_order_update(order, "returned")
+        return Response(self._serialize(order))
+
+    @action(detail=True, methods=["get"])
+    def pdf(self, request, pk=None):
+        order = self.get_object()
+        from io import BytesIO
+
+        return FileResponse(
+            BytesIO(build_sale_invoice_pdf(order)), as_attachment=True,
+            filename=f"facture-{order.number}.pdf", content_type="application/pdf",
+        )
+
+
+class CartSnapshotView(APIView):
+    """Copie serveur du panier de la boutique (synchronisée par le navigateur).
+    Les prix sont recalculés ici : seuls produits et quantités sont acceptés."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def put(self, request):
+        raw_items = request.data.get("items") or []
+        quantities = {}
+        for line in raw_items if isinstance(raw_items, list) else []:
+            try:
+                listing_id, quantity = int(line.get("listing")), int(line.get("quantity"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if quantity > 0:
+                quantities[listing_id] = min(quantity, 10000)
+        if not quantities:
+            CartSnapshot.objects.filter(user=request.user).delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        mode = "rental" if request.data.get("mode") == "rental" else "purchase"
+        listings = MarketplaceListing.objects.filter(pk__in=quantities, marketplace_type=MarketplaceType.SALE, is_active=True)
+        items, total, currency = [], Decimal("0"), "XAF"
+        for listing in listings:
+            unit = (listing.rental_price if mode == "rental" else listing.price) or listing.price
+            items.append({"listing": listing.pk, "title": listing.title, "quantity": quantities[listing.pk], "unit_price": str(unit)})
+            total += unit * quantities[listing.pk]
+            currency = listing.currency
+        snapshot, _ = CartSnapshot.objects.get_or_create(user=request.user)
+        snapshot.items = items
+        snapshot.mode = mode
+        snapshot.item_count = sum(item["quantity"] for item in items)
+        snapshot.total = total
+        snapshot.currency = currency
+        snapshot.save()
+        return Response({"item_count": snapshot.item_count, "total": str(total.quantize(Decimal("0.01")))})
 
 
 class MarketplaceOrderViewSet(viewsets.ReadOnlyModelViewSet):
@@ -220,7 +533,11 @@ class MarketplaceOrderPaymentView(APIView):
         data = serializer.validated_data
         listing = data["listing"]
 
-        needs_subscription = listing.requires_subscription and not request.user.is_admin_role
+        needs_subscription = (
+            listing.requires_subscription
+            and listing.marketplace_type != MarketplaceType.SALE
+            and not request.user.is_admin_role
+        )
         if needs_subscription and not has_active_subscription(request.user, listing.marketplace_type):
             return Response(
                 {"detail": "Un abonnement actif à ce marketplace est requis pour commander ce service."},
@@ -296,12 +613,17 @@ class MarketplaceSubscriptionView(APIView):
 
     def get(self, request):
         subs = {s.marketplace_type: s for s in MarketplaceSubscription.objects.filter(user=request.user).select_related("tier")}
+        item_counts = self._item_counts()
         marketplaces = []
         for value, label in MarketplaceListing.MarketplaceType.choices:
             sub = subs.get(value)
             marketplaces.append({
                 "marketplace_type": value,
                 "marketplace_label": label,
+                # La boutique (Marketplace vente) est entièrement gratuite.
+                "is_free": value == MarketplaceType.SALE,
+                # Nombre d'offres publiées (produits, prestataires, salles) — vitrine de l'accueil.
+                "item_count": item_counts.get(value),
                 "is_active": bool(sub and sub.is_active()),
                 "expires_at": sub.expires_at if sub else None,
                 "tier": sub.tier_id if sub else None,
@@ -329,6 +651,17 @@ class MarketplaceSubscriptionView(APIView):
             "tiers": tiers,
             "marketplaces": marketplaces,
         })
+
+    @staticmethod
+    def _item_counts():
+        from apps.venues.models import Venue
+
+        counts = dict(
+            ProfessionalProfile.objects.filter(is_active=True).order_by().values_list("marketplace_type").annotate(n=Count("id"))
+        )
+        counts[MarketplaceType.SALE] = MarketplaceListing.objects.filter(marketplace_type=MarketplaceType.SALE, is_active=True).count()
+        counts[MarketplaceType.VENUES] = Venue.objects.filter(is_active=True).count()
+        return counts
 
     @idempotent_payment
     def post(self, request):
@@ -412,7 +745,8 @@ class MarketplaceSubscriptionView(APIView):
         sub.expires_at = base + timezone.timedelta(days=plan.duration_days)
         sub.tier = tier
         sub.renewed_at = timezone.now()
-        sub.save(update_fields=["expires_at", "tier", "renewed_at"])
+        sub.expiry_reminded_at = None  # nouvelle échéance : nouvelle relance possible
+        sub.save(update_fields=["expires_at", "tier", "renewed_at", "expiry_reminded_at"])
 
         return Response(MarketplaceSubscriptionSerializer(sub).data)
 
@@ -584,9 +918,16 @@ class ProfessionalProfileViewSet(viewsets.ModelViewSet):
         if not request.user.is_admin_role:
             raise PermissionDenied("Seule l'administration peut accorder ou retirer un badge.")
         profile = self.get_object()
+        previous_status = profile.verification_status
         serializer = ProfessionalProfileBadgesSerializer(profile, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        if "verification_status" in serializer.validated_data:
+            # Décision prise : la demande de vérification est traitée.
+            profile = serializer.save(verification_requested_at=None)
+            if profile.verification_status != previous_status:
+                notify_verification_status_changed(profile)
+        else:
+            serializer.save()
         return Response(serializer.data)
 
     @action(detail=False, methods=["post"], url_path="admin-create")
@@ -660,7 +1001,22 @@ class ProfessionalProfileViewSet(viewsets.ModelViewSet):
             })
         # Voir la note sur `is_active` dans MarketplaceListingViewSet.perform_create :
         # un upload de photo (multipart) à la création masquerait sinon le profil.
-        serializer.save(user=user, is_active=True)
+        profile = serializer.save(user=user, is_active=True)
+        self._request_verification_if_id_card(serializer, profile)
+
+    def perform_update(self, serializer):
+        profile = serializer.save()
+        self._request_verification_if_id_card(serializer, profile)
+
+    def _request_verification_if_id_card(self, serializer, profile):
+        """La CNI est facultative, mais c'est elle qui permet de certifier le
+        compte : dès qu'elle est envoyée (ou remplacée), une demande de
+        vérification apparaît côté administration."""
+        if not serializer.validated_data.get("id_card_photo") or self.request.user.is_admin_role:
+            return
+        profile.verification_requested_at = timezone.now()
+        profile.save(update_fields=["verification_requested_at"])
+        notify_verification_requested(profile)
 
     @action(detail=True, methods=["get", "patch"], url_path="availability-settings")
     def availability_settings(self, request, pk=None):

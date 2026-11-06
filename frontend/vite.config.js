@@ -33,6 +33,8 @@ export default defineConfig({
         // hors-ligne instantané ; les données métier, elles, restent "network first"
         // (section ci-dessous) pour ne jamais servir de contenu périmé par défaut.
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // Réception des notifications Web Push (public/push-sw.js).
+        importScripts: ["push-sw.js"],
         navigateFallbackDenylist: [/^\/admin/, /^\/api/],
         runtimeCaching: [
           {

@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import EmptyState from "../../components/EmptyState.vue";
 import api from "../../services/api";
 import { useAuthStore } from "../../stores/auth";
 import { useLightboxStore } from "../../stores/lightbox";
@@ -12,22 +11,35 @@ const route = useRoute();
 const router = useRouter();
 const lightbox = useLightboxStore();
 const toast = useToastStore();
-const contactingAdmin = ref(false);
+
+const isAdmin = computed(() => auth.role === "admin");
 const conversations = ref([]);
 const messages = ref([]);
 const activeConversationId = ref(null);
 const newMessage = ref("");
 const loading = ref(true);
+const messagesLoading = ref(false);
+const contactingAdmin = ref(false);
+const sending = ref(false);
+const search = ref("");
+const listFilter = ref("all");
 const showNewConversation = ref(false);
 const availableUsers = ref([]);
+const selectedUserId = ref("");
 
-// Pièce jointe sélectionnée avant envoi (photo, document...) — comme sur
-// WhatsApp, l'aperçu s'affiche au-dessus du champ de saisie avant de valider.
+// Réponse de l'assistant : affichée après un court « … en train d'écrire »
+// pour que l'échange se lise comme une vraie conversation.
+const hiddenMessageIds = ref(new Set());
+const assistantTyping = ref(false);
+
+const threadRef = ref(null);
+const composerRef = ref(null);
+const fileInput = ref(null);
+const showJumpToLatest = ref(false);
+
+// --- Pièce jointe -----------------------------------------------------------
 const attachmentFile = ref(null);
 const attachmentPreviewUrl = ref(null);
-const fileInput = ref(null);
-const sending = ref(false);
-
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024; // 20 Mo
 
 function triggerFilePicker() {
@@ -73,72 +85,313 @@ function documentIcon(contentType) {
 function openImageMessage(msg) {
   lightbox.open(msg.attachment_url, msg.body || msg.attachment_name);
 }
-const selectedUserId = ref("");
-let pollHandle = null;
 
-const activeConversation = computed(() =>
-  conversations.value.find((c) => c.id === activeConversationId.value)
-);
+// --- Conversations ------------------------------------------------------------
+const activeConversation = computed(() => conversations.value.find((c) => c.id === activeConversationId.value));
 
-function otherParticipantList(conversation) {
+function others(conversation) {
   return conversation.participants.filter((p) => p.id !== auth.user?.id);
 }
 
-function otherParticipants(conversation) {
-  const others = otherParticipantList(conversation);
-  return others.map((p) => p.name).join(", ") || "Moi";
+function conversationTitle(conversation) {
+  if (conversation.is_admin_support && !isAdmin.value) return "Support InnovEvent";
+  return others(conversation).map((p) => p.name).join(", ") || "Moi";
 }
 
-function isConversationOnline(conversation) {
-  return otherParticipantList(conversation).some((p) => p.is_online);
+function conversationSubtitle(conversation) {
+  if (conversation.is_admin_support && !isAdmin.value) {
+    return conversation.human_handoff ? "Un conseiller vous répond ici" : "Assistant disponible · réponses instantanées";
+  }
+  const person = others(conversation)[0];
+  if (!person) return "";
+  const role = person.role_label || "";
+  return person.is_online ? `${role} · en ligne` : role;
 }
+
+function isOnline(conversation) {
+  if (conversation.is_admin_support && !isAdmin.value) return true;
+  return others(conversation).some((p) => p.is_online);
+}
+
+function initials(name) {
+  return (name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "?";
+}
+
+const AVATAR_TONES = ["#24384f", "#c0272d", "#1f7a73", "#b07a19", "#5b4a9e", "#2f6db0"];
+function avatarTone(seed) {
+  return AVATAR_TONES[Math.abs(Number(seed) || 0) % AVATAR_TONES.length];
+}
+
+function lastMessagePreview(conversation) {
+  const last = conversation.last_message;
+  if (!last) return "Aucun message";
+  const text = last.body
+    || (last.attachment_type === "image" ? "📷 Photo" : last.attachment_name ? `📎 ${last.attachment_name}` : "");
+  if (last.is_automated) return `Assistant : ${text}`;
+  return last.sender === auth.user?.id ? `Vous : ${text}` : text;
+}
+
+function listTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Hier";
+  if (now - date < 6 * 86400000) return date.toLocaleDateString("fr-FR", { weekday: "short" });
+  return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+}
+
+const LIST_FILTERS = computed(() => (isAdmin.value
+  ? [
+      { value: "all", label: "Toutes" },
+      { value: "unread", label: "Non lues" },
+      { value: "waiting", label: "À traiter" },
+      { value: "support", label: "Support" },
+    ]
+  : [
+      { value: "all", label: "Toutes" },
+      { value: "unread", label: "Non lues" },
+    ]));
+
+// Support transmis à l'équipe et dont le dernier message n'est pas une
+// réponse d'un conseiller (l'assistant écrit au nom de l'administrateur).
+function needsReply(conversation) {
+  const last = conversation.last_message;
+  return conversation.is_admin_support && conversation.human_handoff && Boolean(last) && (last.is_automated || last.sender !== auth.user?.id);
+}
+
+function matchesFilter(conversation) {
+  if (listFilter.value === "unread") return conversation.unread_count > 0;
+  if (listFilter.value === "support") return conversation.is_admin_support;
+  // « À traiter » : l'assistant a passé la main, un conseiller doit répondre.
+  if (listFilter.value === "waiting") return needsReply(conversation);
+  return true;
+}
+
+const visibleConversations = computed(() => {
+  const needle = search.value.trim().toLowerCase();
+  return conversations.value
+    .filter(matchesFilter)
+    .filter((c) => !needle || `${conversationTitle(c)} ${c.last_message?.body || ""}`.toLowerCase().includes(needle))
+    .sort((a, b) => {
+      // Côté client, le support reste en tête de liste.
+      if (!isAdmin.value && a.is_admin_support !== b.is_admin_support) return a.is_admin_support ? -1 : 1;
+      return new Date(b.last_message?.created_at || b.created_at) - new Date(a.last_message?.created_at || a.created_at);
+    });
+});
+
+const totalUnread = computed(() => conversations.value.reduce((sum, c) => sum + (c.unread_count || 0), 0));
+const waitingCount = computed(() => conversations.value.filter(needsReply).length);
+const hasSupportConversation = computed(() => conversations.value.some((c) => c.is_admin_support));
 
 async function loadConversations() {
   const { data } = await api.get("/messaging/conversations/");
   conversations.value = data.results || data;
 }
 
-async function openConversation(conversation) {
-  activeConversationId.value = conversation.id;
-  clearAttachment();
-  await loadMessages();
-  await api.post("/messaging/messages/mark-read/", { conversation: conversation.id });
-  await loadConversations();
+// --- Fil de messages ----------------------------------------------------------
+const visibleMessages = computed(() => messages.value.filter((m) => !hiddenMessageIds.value.has(m.id)));
+
+function isMine(msg) {
+  return msg.sender === auth.user?.id && !msg.is_automated;
 }
 
-async function loadMessages() {
-  if (!activeConversationId.value) return;
+function dayLabel(value) {
+  const date = new Date(value);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return "Aujourd'hui";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Hier";
+  return date.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function timeLabel(value) {
+  return new Date(value).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Messages regroupés par jour, et en « blocs » consécutifs du même auteur
+// (moins de 5 minutes d'écart) : nom et avatar affichés une seule fois.
+const timeline = computed(() => {
+  const rows = [];
+  let lastDay = "";
+  let previous = null;
+  visibleMessages.value.forEach((msg) => {
+    const day = new Date(msg.created_at).toDateString();
+    if (day !== lastDay) {
+      rows.push({ type: "day", key: `day-${day}`, label: dayLabel(msg.created_at) });
+      lastDay = day;
+      previous = null;
+    }
+    const author = msg.is_automated ? "bot" : msg.sender;
+    const grouped = previous && previous.author === author && new Date(msg.created_at) - new Date(previous.created_at) < 5 * 60000;
+    rows.push({ type: "message", key: `msg-${msg.id}`, msg, author, first: !grouped });
+    previous = { author, created_at: msg.created_at };
+  });
+  return rows;
+});
+
+const lastMineId = computed(() => [...visibleMessages.value].reverse().find((m) => isMine(m))?.id);
+
+function isNearBottom() {
+  const el = threadRef.value;
+  return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+}
+
+async function scrollToBottom(smooth = false) {
+  await nextTick();
+  const el = threadRef.value;
+  if (!el) return;
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  showJumpToLatest.value = false;
+}
+
+function onThreadScroll() {
+  if (isNearBottom()) showJumpToLatest.value = false;
+}
+
+async function fetchMessages() {
   const { data } = await api.get("/messaging/messages/", { params: { conversation: activeConversationId.value } });
-  messages.value = data.results || data;
+  return data.results || data;
 }
 
-async function sendMessage() {
-  const body = newMessage.value.trim();
-  if (!activeConversationId.value || (!body && !attachmentFile.value)) return;
+// Rafraîchit le fil sans le reconstruire si rien n'a changé (pas de saut).
+async function refreshMessages({ revealAssistant = false } = {}) {
+  if (!activeConversationId.value) return;
+  const conversationId = activeConversationId.value;
+  const fresh = await fetchMessages();
+  if (conversationId !== activeConversationId.value) return;
+
+  const known = new Set(messages.value.filter((m) => !m.pending).map((m) => m.id));
+  const incoming = fresh.filter((m) => !known.has(m.id));
+  const changed = incoming.length || fresh.length !== messages.value.length
+    || fresh.some((m, i) => messages.value[i] && m.is_read !== messages.value[i].is_read);
+  if (!changed) return;
+
+  const wasNearBottom = isNearBottom();
+  const newAssistant = incoming.filter((m) => m.is_automated);
+  if (revealAssistant && newAssistant.length) {
+    newAssistant.forEach((m) => hiddenMessageIds.value.add(m.id));
+    assistantTyping.value = true;
+    setTimeout(() => {
+      newAssistant.forEach((m) => hiddenMessageIds.value.delete(m.id));
+      hiddenMessageIds.value = new Set(hiddenMessageIds.value);
+      assistantTyping.value = false;
+      scrollToBottom(true);
+    }, 900);
+  }
+  messages.value = fresh;
+
+  const fromOthers = incoming.filter((m) => !isMine(m));
+  if (fromOthers.length) {
+    api.post("/messaging/messages/mark-read/", { conversation: conversationId }).catch(() => {});
+  }
+  if (wasNearBottom || incoming.some(isMine)) scrollToBottom(true);
+  else if (fromOthers.length) showJumpToLatest.value = true;
+}
+
+async function openConversation(conversation) {
+  if (activeConversationId.value === conversation.id) return;
+  activeConversationId.value = conversation.id;
+  messages.value = [];
+  hiddenMessageIds.value = new Set();
+  assistantTyping.value = false;
+  clearAttachment();
+  messagesLoading.value = true;
+  try {
+    messages.value = await fetchMessages();
+  } finally {
+    messagesLoading.value = false;
+  }
+  scrollToBottom();
+  if (conversation.unread_count) {
+    await api.post("/messaging/messages/mark-read/", { conversation: conversation.id });
+    conversation.unread_count = 0;
+  }
+  nextTick(() => composerRef.value?.focus());
+}
+
+function closeConversation() {
+  activeConversationId.value = null;
+  messages.value = [];
+}
+
+// --- Envoi --------------------------------------------------------------------
+async function sendMessage(text = null) {
+  const body = (text ?? newMessage.value).trim();
+  if (!activeConversationId.value || (!body && !attachmentFile.value) || sending.value) return;
+  const conversation = activeConversation.value;
+  const file = attachmentFile.value;
+
+  // Affiché tout de suite, confirmé quand le serveur répond.
+  const temp = {
+    id: `tmp-${Date.now()}`, pending: true, sender: auth.user?.id, body, created_at: new Date().toISOString(),
+    is_automated: false, is_read: false, attachment_name: file?.name, attachment_type: file?.type?.startsWith("image/") ? "image" : file ? "document" : "",
+    attachment_url: file && attachmentPreviewUrl.value ? attachmentPreviewUrl.value : null,
+  };
+  messages.value = [...messages.value, temp];
+  if (text === null) newMessage.value = "";
+  resizeComposer();
+  scrollToBottom(true);
   sending.value = true;
   try {
-    if (attachmentFile.value) {
+    if (file) {
       const payload = new FormData();
       payload.append("conversation", activeConversationId.value);
       if (body) payload.append("body", body);
-      payload.append("attachment", attachmentFile.value);
+      payload.append("attachment", file);
+      attachmentFile.value = null;
       await api.post("/messaging/messages/", payload);
       clearAttachment();
     } else {
       await api.post("/messaging/messages/", { conversation: activeConversationId.value, body });
     }
-    newMessage.value = "";
-    await loadMessages();
+    const expectAssistant = conversation?.is_admin_support && !conversation.human_handoff && !isAdmin.value;
+    messages.value = messages.value.filter((m) => m.id !== temp.id);
+    await refreshMessages({ revealAssistant: expectAssistant });
     await loadConversations();
   } catch (e) {
+    messages.value = messages.value.filter((m) => m.id !== temp.id);
+    if (text === null) newMessage.value = body;
     toast.error(e?.response?.data?.detail || "Impossible d'envoyer ce message.");
   } finally {
     sending.value = false;
   }
 }
 
+function onComposerKeydown(event) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    sendMessage();
+  }
+}
+
+function resizeComposer() {
+  nextTick(() => {
+    const el = composerRef.value;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  });
+}
+
+// Suggestions affichées dans la conversation avec le support.
+const QUICK_REPLIES = [
+  "Je veux louer du matériel",
+  "Acheter dans la boutique",
+  "Où est ma facture ?",
+  "Trouver un prestataire",
+  "Parler à un conseiller",
+];
+const showQuickReplies = computed(() =>
+  !isAdmin.value && activeConversation.value?.is_admin_support && !activeConversation.value.human_handoff && !sending.value
+);
+
+// --- Nouvelle conversation (admin) / support (autres comptes) --------------
 async function loadAvailableUsers() {
-  if (auth.role !== "admin") return;
+  if (!isAdmin.value) return;
   try {
     const { data } = await api.get("/auth/users/");
     availableUsers.value = (data.results || data).filter((u) => u.id !== auth.user?.id);
@@ -153,7 +406,7 @@ async function startConversation() {
   showNewConversation.value = false;
   selectedUserId.value = "";
   await loadConversations();
-  await openConversation(data);
+  await openConversation(conversations.value.find((c) => c.id === data.id) || data);
 }
 
 async function contactAdmin() {
@@ -161,17 +414,64 @@ async function contactAdmin() {
   try {
     const { data } = await api.post("/messaging/conversations/contact-admin/");
     await loadConversations();
-    await openConversation(data);
+    await openConversation(conversations.value.find((c) => c.id === data.id) || data);
   } finally {
     contactingAdmin.value = false;
   }
 }
 
+// --- Rafraîchissement ---------------------------------------------------------
+// Toutes les 4 s quand une conversation est ouverte et l'onglet visible,
+// sinon toutes les 15 s : les nouveaux messages arrivent sans attendre.
+let pollTimer = null;
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  const delay = document.hidden ? 30000 : activeConversationId.value ? 4000 : 15000;
+  pollTimer = setTimeout(async () => {
+    try {
+      await loadConversations();
+      if (activeConversationId.value && !sending.value) await refreshMessages();
+    } catch (e) {
+      // réseau momentanément indisponible : nouvel essai au prochain tour
+    }
+    schedulePoll();
+  }, delay);
+}
+
+// Une notification arrive en temps réel (WebSocket ou push) : la liste et la
+// conversation ouverte se mettent à jour tout de suite.
+function onRealtimeNotification(event) {
+  const link = event.detail?.link || "";
+  if (!link.includes("messaging")) return;
+  loadConversations()
+    .then(() => {
+      // Sur grand écran, sans conversation ouverte : on ouvre la plus récente.
+      if (!activeConversationId.value && window.innerWidth > 900 && visibleConversations.value.length) {
+        openConversation(visibleConversations.value[0]);
+      }
+    })
+    .catch(() => {});
+  if (activeConversationId.value && !sending.value) refreshMessages().catch(() => {});
+}
+
+function onVisibilityChange() {
+  if (!document.hidden) {
+    loadConversations().catch(() => {});
+    if (activeConversationId.value) refreshMessages().catch(() => {});
+  }
+  schedulePoll();
+}
+
+watch(activeConversationId, schedulePoll);
+
 onMounted(async () => {
   loading.value = true;
-  await loadConversations();
-  await loadAvailableUsers();
-  loading.value = false;
+  try {
+    await loadConversations();
+    await loadAvailableUsers();
+  } finally {
+    loading.value = false;
+  }
 
   const conversationId = Number(route.query.conversation);
   if (conversationId) {
@@ -186,228 +486,433 @@ onMounted(async () => {
     } finally {
       router.replace({ query: {} });
     }
+  } else if (window.innerWidth > 900 && visibleConversations.value.length) {
+    await openConversation(visibleConversations.value[0]);
   }
 
-  pollHandle = setInterval(async () => {
-    await loadConversations();
-    if (activeConversationId.value) await loadMessages();
-  }, 10000);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  window.addEventListener("ie:notification", onRealtimeNotification);
+  schedulePoll();
 });
 
+// Notification touchée alors que la messagerie est déjà ouverte.
+watch(
+  () => route.query.conversation,
+  async (value) => {
+    const target = conversations.value.find((c) => c.id === Number(value));
+    if (!value) return;
+    if (!target) await loadConversations();
+    const conversation = conversations.value.find((c) => c.id === Number(value));
+    if (conversation) await openConversation(conversation);
+    router.replace({ query: {} });
+  },
+);
+
 onBeforeUnmount(() => {
-  if (pollHandle) clearInterval(pollHandle);
+  clearTimeout(pollTimer);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+  window.removeEventListener("ie:notification", onRealtimeNotification);
+  clearAttachment();
 });
 </script>
 
 <template>
-  <div>
-    <div class="ie-page-header">
-      <div>
-        <h1><i class="fa-solid fa-comments" style="color: var(--ie-red); margin-right: 8px;"></i>Messagerie</h1>
-        <p class="ie-page-subtitle">Échangez avec les autres utilisateurs de la plateforme.</p>
-      </div>
-      <div class="ie-page-header-actions">
-        <button v-if="auth.role === 'admin'" class="ie-btn ie-btn-primary" @click="showNewConversation = !showNewConversation">
-          <i class="fa-solid" :class="showNewConversation ? 'fa-xmark' : 'fa-plus'"></i> {{ showNewConversation ? "Annuler" : "Nouvelle conversation" }}
-        </button>
-        <button v-else class="ie-btn ie-btn-primary" :disabled="contactingAdmin" @click="contactAdmin">
-          <i class="fa-solid fa-headset"></i> {{ contactingAdmin ? "Connexion…" : "Contacter l'administration" }}
-        </button>
-      </div>
-    </div>
-
-    <div v-if="showNewConversation" class="ie-card" style="padding: 16px; margin-bottom: 16px; display:flex; gap:10px; align-items:center;">
-      <select v-model="selectedUserId" class="ie-select" style="max-width: 320px;">
-        <option value="" disabled>Choisir un utilisateur</option>
-        <option v-for="u in availableUsers" :key="u.id" :value="u.id">{{ u.first_name }} {{ u.last_name }} ({{ u.username }})</option>
-      </select>
-      <button class="ie-btn ie-btn-secondary" @click="startConversation">Démarrer</button>
-    </div>
-
-    <div class="ie-messaging-layout ie-card" :class="{ 'has-active-conversation': activeConversation }">
-      <aside class="ie-conversation-list">
-        <div v-if="loading" class="ie-skeleton-table">
-          <div class="ie-skeleton ie-skeleton-row" v-for="i in 4" :key="i" style="height: 44px;"></div>
+  <div class="msg" :class="{ 'has-active': activeConversation }">
+    <!-- Liste des conversations -->
+    <aside class="msg-list">
+      <header class="msg-list-head">
+        <div>
+          <h1>Messages</h1>
+          <small v-if="totalUnread">{{ totalUnread }} non lu{{ totalUnread > 1 ? "s" : "" }}</small>
+          <small v-else>Tout est lu</small>
         </div>
-        <template v-if="!loading">
+        <button v-if="isAdmin" type="button" class="msg-icon-btn" :class="{ on: showNewConversation }" aria-label="Nouvelle conversation" @click="showNewConversation = !showNewConversation">
+          <i class="fa-solid" :class="showNewConversation ? 'fa-xmark' : 'fa-pen-to-square'"></i>
+        </button>
+      </header>
+
+      <div v-if="showNewConversation" class="msg-new">
+        <select v-model="selectedUserId" class="ie-select" aria-label="Destinataire">
+          <option value="" disabled>Choisir un utilisateur…</option>
+          <option v-for="u in availableUsers" :key="u.id" :value="u.id">{{ u.first_name }} {{ u.last_name }} ({{ u.username }})</option>
+        </select>
+        <button type="button" class="ie-btn ie-btn-primary ie-btn-sm" :disabled="!selectedUserId" @click="startConversation">Démarrer</button>
+      </div>
+
+      <button v-if="!isAdmin && !hasSupportConversation && !loading" type="button" class="msg-support-cta" :disabled="contactingAdmin" @click="contactAdmin">
+        <span><i class="fa-solid fa-headset"></i></span>
+        <div><strong>Besoin d'aide ?</strong><small>Écrivez au support InnovEvent</small></div>
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+
+      <div class="msg-search">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input v-model="search" type="search" placeholder="Rechercher une conversation" aria-label="Rechercher une conversation" />
+      </div>
+      <div class="msg-filters" role="tablist">
+        <button
+          v-for="f in LIST_FILTERS" :key="f.value" type="button" role="tab" :aria-selected="listFilter === f.value"
+          :class="{ active: listFilter === f.value }" @click="listFilter = f.value"
+        >
+          {{ f.label }}
+          <span v-if="f.value === 'unread' && totalUnread">{{ totalUnread }}</span>
+          <span v-if="f.value === 'waiting' && waitingCount" class="alert">{{ waitingCount }}</span>
+        </button>
+      </div>
+
+      <div class="msg-items">
+        <template v-if="loading">
+          <div v-for="i in 5" :key="i" class="msg-item-skeleton"><span class="ie-skeleton"></span><div><span class="ie-skeleton"></span><span class="ie-skeleton"></span></div></div>
+        </template>
+        <template v-else>
           <button
-            v-for="conv in conversations"
-            :key="conv.id"
-            class="ie-conversation-item"
-            :class="{ active: conv.id === activeConversationId }"
+            v-for="conv in visibleConversations" :key="conv.id" type="button" class="msg-item"
+            :class="{ active: conv.id === activeConversationId, unread: conv.unread_count }"
             @click="openConversation(conv)"
           >
-            <div class="ie-conversation-name">
-              <span class="ie-online-dot" :class="{ online: isConversationOnline(conv) }"></span>
-              {{ otherParticipants(conv) }}
-            </div>
-            <div class="ie-conversation-preview">
-              {{ conv.last_message?.body
-                || (conv.last_message?.attachment_type === "image" ? "📷 Photo"
-                    : conv.last_message?.attachment_name ? `📎 ${conv.last_message.attachment_name}`
-                    : "Aucun message") }}
-            </div>
-            <span v-if="conv.unread_count" class="ie-nav-badge">{{ conv.unread_count }}</span>
+            <span class="msg-avatar" :class="{ support: conv.is_admin_support && !isAdmin }" :style="conv.is_admin_support && !isAdmin ? null : { background: avatarTone(others(conv)[0]?.id) }">
+              <i v-if="conv.is_admin_support && !isAdmin" class="fa-solid fa-headset"></i>
+              <template v-else>{{ initials(conversationTitle(conv)) }}</template>
+              <b v-if="isOnline(conv)" class="msg-online"></b>
+            </span>
+            <span class="msg-item-body">
+              <span class="msg-item-top">
+                <strong>{{ conversationTitle(conv) }}</strong>
+                <time>{{ listTime(conv.last_message?.created_at || conv.created_at) }}</time>
+              </span>
+              <span class="msg-item-bottom">
+                <span class="msg-preview">{{ lastMessagePreview(conv) }}</span>
+                <span v-if="conv.unread_count" class="msg-unread">{{ conv.unread_count }}</span>
+              </span>
+              <span v-if="isAdmin && conv.is_admin_support" class="msg-tags">
+                <em>Support</em>
+                <em v-if="needsReply(conv)" class="warn">Conseiller requis</em>
+              </span>
+            </span>
           </button>
-          <EmptyState v-if="!conversations.length" icon="fa-solid fa-comments" text="Aucune conversation." />
+          <div v-if="!visibleConversations.length" class="msg-list-empty">
+            <i class="fa-regular fa-comments"></i>
+            <p>{{ search || listFilter !== "all" ? "Aucune conversation ne correspond." : "Aucune conversation pour le moment." }}</p>
+          </div>
         </template>
-      </aside>
+      </div>
+    </aside>
 
-      <section class="ie-thread">
-        <template v-if="activeConversation">
-          <div class="ie-thread-header">
-            <button type="button" class="mobile-conversation-back" @click="activeConversationId = null" aria-label="Retour aux conversations">
-              <i class="fa-solid fa-arrow-left"></i>
-            </button>
-            <span class="ie-online-dot" :class="{ online: isConversationOnline(activeConversation) }"></span>
-            <div class="ie-thread-heading">
-              <span>{{ otherParticipants(activeConversation) }}</span>
-              <small v-if="activeConversation.is_admin_support" class="ie-support-status">
-                {{ activeConversation.human_handoff
-                  ? "Assistant en pause · l'administration peut répondre ici"
-                  : "Assistant InnovEvent disponible · un administrateur peut prendre le relais" }}
-              </small>
-            </div>
+    <!-- Conversation -->
+    <section class="msg-thread">
+      <template v-if="activeConversation">
+        <header class="msg-thread-head">
+          <button type="button" class="msg-back" aria-label="Retour aux conversations" @click="closeConversation">
+            <i class="fa-solid fa-arrow-left"></i>
+          </button>
+          <span class="msg-avatar" :class="{ support: activeConversation.is_admin_support && !isAdmin }" :style="activeConversation.is_admin_support && !isAdmin ? null : { background: avatarTone(others(activeConversation)[0]?.id) }">
+            <i v-if="activeConversation.is_admin_support && !isAdmin" class="fa-solid fa-headset"></i>
+            <template v-else>{{ initials(conversationTitle(activeConversation)) }}</template>
+            <b v-if="isOnline(activeConversation)" class="msg-online"></b>
+          </span>
+          <div class="msg-thread-title">
+            <strong>{{ conversationTitle(activeConversation) }}</strong>
+            <small>{{ conversationSubtitle(activeConversation) }}</small>
           </div>
-          <div class="ie-thread-messages">
+          <span v-if="isAdmin && activeConversation.is_admin_support" class="msg-mode" :class="{ human: activeConversation.human_handoff }">
+            <i class="fa-solid" :class="activeConversation.human_handoff ? 'fa-user-tie' : 'fa-robot'"></i>
+            {{ activeConversation.human_handoff ? "Conseiller en charge" : "Assistant actif" }}
+          </span>
+        </header>
+
+        <div ref="threadRef" class="msg-messages" @scroll.passive="onThreadScroll">
+          <div v-if="messagesLoading" class="msg-loading"><span class="ie-skeleton"></span><span class="ie-skeleton mine"></span><span class="ie-skeleton"></span></div>
+
+          <div v-else-if="!messages.length" class="msg-welcome">
+            <span><i class="fa-solid" :class="activeConversation.is_admin_support ? 'fa-headset' : 'fa-comments'"></i></span>
+            <strong>{{ activeConversation.is_admin_support && !isAdmin ? "Bienvenue au support InnovEvent" : "Démarrez la conversation" }}</strong>
+            <p v-if="activeConversation.is_admin_support && !isAdmin">Posez votre question : notre assistant répond tout de suite, et un conseiller prend le relais si besoin.</p>
+            <p v-else>Envoyez un premier message à {{ conversationTitle(activeConversation) }}.</p>
+          </div>
+
+          <template v-for="row in timeline" :key="row.key">
+            <div v-if="row.type === 'day'" class="msg-day"><span>{{ row.label }}</span></div>
             <div
-              v-for="msg in messages"
-              :key="msg.id"
-              class="ie-message-bubble"
-              :class="{ mine: msg.sender === auth.user?.id && !msg.is_automated, automated: msg.is_automated }"
+              v-else class="msg-row"
+              :class="{ mine: isMine(row.msg), bot: row.msg.is_automated, first: row.first, pending: row.msg.pending }"
             >
-              <div class="ie-message-sender">{{ msg.sender_name }}</div>
-
-              <img
-                v-if="msg.attachment_type === 'image'" :src="msg.attachment_url" :alt="msg.attachment_name"
-                class="ie-message-image" @click="openImageMessage(msg)"
-              />
-              <a
-                v-else-if="msg.attachment_url" :href="msg.attachment_url" target="_blank" rel="noopener"
-                class="ie-message-document"
-              >
-                <i :class="documentIcon(msg.attachment_content_type)"></i>
-                <div class="ie-message-document-info">
-                  <span class="ie-message-document-name">{{ msg.attachment_name }}</span>
-                  <span class="ie-message-document-size">{{ formatFileSize(msg.attachment_size) }}</span>
+              <span v-if="!isMine(row.msg)" class="msg-row-avatar">
+                <template v-if="row.first">
+                  <span v-if="row.msg.is_automated" class="msg-avatar small bot"><i class="fa-solid fa-robot"></i></span>
+                  <span v-else class="msg-avatar small" :style="{ background: avatarTone(row.msg.sender) }">{{ initials(row.msg.sender_name) }}</span>
+                </template>
+              </span>
+              <div class="msg-bubble-wrap">
+                <span v-if="row.first && !isMine(row.msg)" class="msg-author">
+                  {{ row.msg.is_automated ? "Assistant InnovEvent" : row.msg.sender_name }}
+                  <em v-if="row.msg.is_automated">Auto</em>
+                </span>
+                <div class="msg-bubble">
+                  <img
+                    v-if="row.msg.attachment_type === 'image' && row.msg.attachment_url" :src="row.msg.attachment_url" :alt="row.msg.attachment_name"
+                    class="msg-image" @click="openImageMessage(row.msg)"
+                  />
+                  <a
+                    v-else-if="row.msg.attachment_url || row.msg.attachment_name" :href="row.msg.attachment_url || undefined" target="_blank" rel="noopener"
+                    class="msg-doc"
+                  >
+                    <i :class="documentIcon(row.msg.attachment_content_type)"></i>
+                    <span><strong>{{ row.msg.attachment_name }}</strong><small>{{ formatFileSize(row.msg.attachment_size) }}</small></span>
+                    <i class="fa-solid fa-download"></i>
+                  </a>
+                  <p v-if="row.msg.body">{{ row.msg.body }}</p>
+                  <span class="msg-meta">
+                    {{ timeLabel(row.msg.created_at) }}
+                    <template v-if="isMine(row.msg)">
+                      <i v-if="row.msg.pending" class="fa-regular fa-clock" title="Envoi…"></i>
+                      <i v-else-if="row.msg.is_read" class="fa-solid fa-check-double read" title="Lu"></i>
+                      <i v-else class="fa-solid fa-check" title="Envoyé"></i>
+                    </template>
+                  </span>
                 </div>
-                <i class="fa-solid fa-download ie-message-document-download"></i>
-              </a>
-
-              <div v-if="msg.body">{{ msg.body }}</div>
+                <span v-if="isMine(row.msg) && row.msg.id === lastMineId && row.msg.is_read" class="msg-seen">Vu</span>
+              </div>
             </div>
-          </div>
+          </template>
 
-          <div v-if="attachmentFile" class="ie-attachment-preview">
+          <div v-if="assistantTyping" class="msg-row bot first">
+            <span class="msg-row-avatar"><span class="msg-avatar small bot"><i class="fa-solid fa-robot"></i></span></span>
+            <div class="msg-bubble-wrap"><div class="msg-bubble msg-typing"><span></span><span></span><span></span></div></div>
+          </div>
+        </div>
+
+        <button v-if="showJumpToLatest" type="button" class="msg-jump" @click="scrollToBottom(true)">
+          <i class="fa-solid fa-arrow-down"></i> Nouveaux messages
+        </button>
+
+        <footer class="msg-composer">
+          <div v-if="showQuickReplies" class="msg-quick">
+            <button v-for="q in QUICK_REPLIES" :key="q" type="button" @click="sendMessage(q)">{{ q }}</button>
+          </div>
+          <div v-if="attachmentFile" class="msg-attachment">
             <img v-if="attachmentPreviewUrl" :src="attachmentPreviewUrl" alt="Aperçu" />
-            <div v-else class="ie-attachment-preview-doc">
-              <i :class="documentIcon(attachmentFile.type)"></i>
-              <span>{{ attachmentFile.name }}</span>
-            </div>
-            <button type="button" class="ie-attachment-preview-remove" @click="clearAttachment" aria-label="Retirer">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
+            <i v-else :class="documentIcon(attachmentFile.type)"></i>
+            <span>{{ attachmentFile.name }} <small>{{ formatFileSize(attachmentFile.size) }}</small></span>
+            <button type="button" aria-label="Retirer la pièce jointe" @click="clearAttachment"><i class="fa-solid fa-xmark"></i></button>
           </div>
-
-          <form class="ie-thread-input" @submit.prevent="sendMessage">
+          <form class="msg-input" @submit.prevent="sendMessage()">
             <input ref="fileInput" type="file" hidden @change="onFileSelected" />
-            <button type="button" class="ie-thread-attach-btn" @click="triggerFilePicker" aria-label="Joindre un fichier">
-              <i class="fa-solid fa-paperclip"></i>
-            </button>
-            <input v-model="newMessage" class="ie-input" placeholder="Écrire un message…" />
-            <button class="ie-btn ie-btn-primary" type="submit" :disabled="sending || (!newMessage.trim() && !attachmentFile)">
+            <button type="button" class="msg-icon-btn" aria-label="Joindre un fichier" @click="triggerFilePicker"><i class="fa-solid fa-paperclip"></i></button>
+            <textarea
+              ref="composerRef" v-model="newMessage" rows="1" placeholder="Écrire un message…" aria-label="Message"
+              @keydown="onComposerKeydown" @input="resizeComposer"
+            ></textarea>
+            <button type="submit" class="msg-send" :disabled="sending || (!newMessage.trim() && !attachmentFile)" aria-label="Envoyer">
               <i class="fa-solid fa-paper-plane"></i>
             </button>
           </form>
-        </template>
-        <div v-else class="ie-empty-state" style="margin: auto;">Sélectionnez une conversation.</div>
-      </section>
-    </div>
+          <small class="msg-hint">Entrée pour envoyer · Maj + Entrée pour aller à la ligne</small>
+        </footer>
+      </template>
+
+      <div v-else class="msg-empty">
+        <span><i class="fa-regular fa-comments"></i></span>
+        <strong>Vos conversations</strong>
+        <p>Sélectionnez une conversation pour afficher les messages.</p>
+        <button v-if="!isAdmin" type="button" class="ie-btn ie-btn-primary" :disabled="contactingAdmin" @click="contactAdmin">
+          <i class="fa-solid fa-headset"></i> {{ contactingAdmin ? "Connexion…" : "Écrire au support" }}
+        </button>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.ie-page-header { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 20px; }
-.ie-messaging-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); height: min(560px, calc(100dvh - 220px)); min-height: 420px; overflow: hidden; }
-.ie-conversation-list { border-right: 1px solid var(--ie-line); overflow-y: auto; }
-.ie-conversation-item {
-  display: block; width: 100%; text-align: left; padding: 14px 16px;
-  border: 0; border-bottom: 1px solid var(--ie-line); background: #fff; cursor: pointer; position: relative;
+.msg {
+  --msg-height: calc(100dvh - 68px - 48px);
+  display: grid; grid-template-columns: 340px minmax(0, 1fr); height: var(--msg-height); min-height: 460px; overflow: hidden;
+  border: 1px solid var(--ie-line); border-radius: 18px; background: #fff; box-shadow: var(--ie-shadow-sm);
 }
-.ie-conversation-item:hover, .ie-conversation-item.active { background: var(--ie-red-soft); }
-.ie-conversation-name { font-weight: 700; font-size: 13.5px; color: var(--ie-navy); display: flex; align-items: center; gap: 6px; }
-.ie-online-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 999px;
-  background: #c7cbd1; flex-shrink: 0;
-}
-.ie-online-dot.online { background: var(--ie-success); box-shadow: 0 0 0 3px var(--ie-success-soft); }
-.ie-conversation-preview { font-size: 12px; color: var(--ie-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ie-nav-badge {
-  position: absolute; top: 12px; right: 12px; background: var(--ie-red); color: #fff;
-  font-size: 11px; font-weight: 800; border-radius: 999px; min-width: 18px; height: 18px;
-  display: inline-flex; align-items: center; justify-content: center; padding: 0 5px;
-}
-.ie-thread { display: flex; flex-direction: column; }
-.ie-thread-header { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-bottom: 1px solid var(--ie-line); font-weight: 700; color: var(--ie-navy); }
-.ie-thread-heading { display: flex; flex-direction: column; gap: 2px; }
-.ie-support-status { color: var(--ie-muted); font-size: 11px; font-weight: 400; }
-.mobile-conversation-back { display: none; }
-.ie-thread-messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
-.ie-message-bubble { max-width: 70%; background: #eef0f2; border-radius: 12px; padding: 8px 12px; font-size: 13.5px; }
-.ie-message-bubble.mine { align-self: flex-end; background: var(--ie-red-soft); }
-.ie-message-bubble.automated { border: 1px solid var(--ie-line); }
-.ie-message-sender { font-size: 11px; font-weight: 700; color: var(--ie-muted); margin-bottom: 2px; }
-.ie-thread-input { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--ie-line); }
-.ie-thread-input .ie-input { flex: 1; }
-.ie-thread-attach-btn {
-  width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--ie-navy-soft); color: var(--ie-navy);
-  cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.ie-thread-attach-btn:hover { background: var(--ie-red-soft); color: var(--ie-red); }
 
-.ie-message-image { max-width: 220px; max-height: 220px; border-radius: 8px; display: block; cursor: pointer; margin-bottom: 4px; object-fit: cover; }
-.ie-message-document {
-  display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--ie-line);
-  border-radius: 8px; padding: 8px 10px; text-decoration: none; color: inherit; margin-bottom: 4px; min-width: 180px;
+/* Liste */
+.msg-list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--ie-line); background: #fbfcfd; }
+.msg-list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 18px 12px; }
+.msg-list-head h1 { margin: 0; color: var(--ie-navy); font-size: 21px; }
+.msg-list-head small { color: var(--ie-muted); font-size: 12px; }
+.msg-icon-btn {
+  display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; border: 1px solid var(--ie-line); border-radius: 10px;
+  background: #fff; color: var(--ie-navy); font-size: 15px; cursor: pointer;
 }
-.ie-message-document i:first-child { font-size: 22px; color: var(--ie-red); flex-shrink: 0; }
-.ie-message-document-info { display: flex; flex-direction: column; overflow: hidden; }
-.ie-message-document-name { font-size: 12.5px; font-weight: 600; color: var(--ie-navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ie-message-document-size { font-size: 10.5px; color: var(--ie-muted); }
-.ie-message-document-download { margin-left: auto; color: var(--ie-muted); flex-shrink: 0; }
+.msg-icon-btn:hover, .msg-icon-btn.on { border-color: var(--ie-navy); background: var(--ie-navy-soft); }
+.msg-new { display: flex; gap: 8px; padding: 0 18px 12px; }
+.msg-new .ie-select { flex: 1; min-width: 0; }
+.msg-support-cta {
+  display: flex; align-items: center; gap: 12px; margin: 0 18px 12px; padding: 12px; border: 1px solid #f0d4d5; border-radius: 12px;
+  background: var(--ie-red-soft); text-align: left; cursor: pointer; font-family: inherit;
+}
+.msg-support-cta > span { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--ie-red); color: #fff; }
+.msg-support-cta div { flex: 1; display: flex; flex-direction: column; }
+.msg-support-cta strong { color: var(--ie-navy); font-size: 13.5px; }
+.msg-support-cta small { color: #7a4a4c; font-size: 12px; }
+.msg-support-cta > i { color: var(--ie-red); font-size: 12px; }
+.msg-search { position: relative; margin: 0 18px; }
+.msg-search i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ie-muted); font-size: 13px; }
+.msg-search input { width: 100%; height: 38px; padding: 0 12px 0 34px; border: 1px solid var(--ie-line); border-radius: 10px; background: #fff; font-size: 13px; font-family: inherit; }
+.msg-search input:focus { outline: none; border-color: var(--ie-navy); }
+.msg-filters { display: flex; gap: 6px; padding: 12px 18px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--ie-line); }
+.msg-filters button {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 6px 12px; border: 1px solid var(--ie-line); border-radius: 999px;
+  background: #fff; color: #5d6771; font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.msg-filters button.active { background: var(--ie-navy); border-color: var(--ie-navy); color: #fff; }
+.msg-filters button span { min-width: 18px; padding: 0 5px; border-radius: 999px; background: #e7eaee; color: var(--ie-navy); font-size: 11px; }
+.msg-filters button span.alert { background: var(--ie-red); color: #fff; }
+.msg-filters button.active span { background: #ffffff2b; color: #fff; }
+.msg-items { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 8px; }
+.msg-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 10px; border: 0; border-radius: 12px; background: none;
+  text-align: left; cursor: pointer; font-family: inherit;
+}
+.msg-item:hover { background: #f1f3f6; }
+.msg-item.active { background: #fff; box-shadow: 0 2px 10px #18283b14, inset 3px 0 0 var(--ie-red); }
+.msg-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.msg-item-top, .msg-item-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.msg-item-top strong { overflow: hidden; color: var(--ie-navy); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.msg-item-top time { flex-shrink: 0; color: var(--ie-muted); font-size: 11.5px; }
+.msg-preview { overflow: hidden; color: var(--ie-muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.msg-item.unread .msg-preview { color: var(--ie-ink); font-weight: 600; }
+.msg-item.unread time { color: var(--ie-red); font-weight: 700; }
+.msg-unread { display: grid; place-items: center; flex-shrink: 0; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--ie-red); color: #fff; font-size: 11px; font-weight: 800; }
+.msg-tags { display: flex; gap: 4px; }
+.msg-tags em { padding: 1px 7px; border-radius: 6px; background: var(--ie-navy-soft); color: var(--ie-navy); font-size: 10.5px; font-weight: 700; font-style: normal; }
+.msg-tags em.warn { background: var(--ie-warning-soft); color: var(--ie-warning); }
+.msg-list-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 20px; color: var(--ie-muted); text-align: center; }
+.msg-list-empty i { font-size: 28px; opacity: 0.5; }
+.msg-list-empty p { margin: 0; font-size: 13px; }
+.msg-item-skeleton { display: flex; gap: 12px; padding: 11px 10px; }
+.msg-item-skeleton > .ie-skeleton { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; }
+.msg-item-skeleton div { flex: 1; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.msg-item-skeleton div .ie-skeleton { height: 10px; border-radius: 6px; }
+.msg-item-skeleton div .ie-skeleton:last-child { width: 70%; }
 
-.ie-attachment-preview {
-  position: relative; display: inline-flex; align-items: center; margin: 0 20px 10px; padding: 6px;
-  background: #fafbfc; border: 1px solid var(--ie-line); border-radius: 10px; width: fit-content;
+/* Avatars */
+.msg-avatar {
+  position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 50%;
+  background: var(--ie-navy); color: #fff; font-size: 14px; font-weight: 800; letter-spacing: 0.02em;
 }
-.ie-attachment-preview img { height: 64px; width: 64px; object-fit: cover; border-radius: 6px; }
-.ie-attachment-preview-doc { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; color: var(--ie-navy); }
-.ie-attachment-preview-doc i { font-size: 20px; color: var(--ie-red); }
-.ie-attachment-preview-remove {
-  position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0;
-  background: var(--ie-navy); color: #fff; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+.msg-avatar.support { background: var(--ie-red); font-size: 17px; }
+.msg-avatar.small { width: 30px; height: 30px; flex-basis: 30px; font-size: 11px; }
+.msg-avatar.bot { background: var(--ie-navy-soft); color: var(--ie-navy); font-size: 13px; }
+.msg-online { position: absolute; right: 0; bottom: 1px; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%; background: #22a05b; }
+
+/* Conversation */
+.msg-thread { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #fff; }
+.msg-thread-head { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--ie-line); background: #fff; }
+.msg-back { display: none; }
+.msg-thread-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.msg-thread-title strong { overflow: hidden; color: var(--ie-navy); font-size: 15.5px; text-overflow: ellipsis; white-space: nowrap; }
+.msg-thread-title small { color: var(--ie-muted); font-size: 12px; }
+.msg-mode { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 5px 10px; border-radius: 999px; background: var(--ie-navy-soft); color: var(--ie-navy); font-size: 12px; font-weight: 700; }
+.msg-mode.human { background: var(--ie-warning-soft); color: var(--ie-warning); }
+
+.msg-messages {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px 10px; display: flex; flex-direction: column; gap: 2px;
+  background: linear-gradient(#f7f8fa, #f7f8fa);
 }
-@media (max-width: 760px) {
-  .ie-page-header { align-items: flex-start; flex-direction: column; }
-  .ie-page-header-actions { width: 100%; }
-  .ie-page-header-actions .ie-btn { width: 100%; justify-content: center; }
-  .ie-messaging-layout { display: block; height: min(68dvh, 620px); min-height: 420px; }
-  .ie-conversation-list { height: 100%; border-right: 0; }
-  .ie-thread { display: none; height: 100%; }
-  .ie-messaging-layout.has-active-conversation .ie-conversation-list { display: none; }
-  .ie-messaging-layout.has-active-conversation .ie-thread { display: flex; }
-  .mobile-conversation-back { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--ie-navy-soft); color: var(--ie-navy); }
-  .ie-thread-header { padding: 10px 12px; }
-  .ie-thread-messages { padding: 12px; }
-  .ie-message-bubble { max-width: 88%; overflow-wrap: anywhere; }
-  .ie-thread-input { gap: 7px; padding: 10px; }
-  .ie-thread-input .ie-input { min-width: 0; }
-  .ie-thread-input .ie-btn { padding: 9px 12px; }
-  .ie-message-document { min-width: 0; max-width: 100%; }
+.msg-loading { display: flex; flex-direction: column; gap: 10px; }
+.msg-loading .ie-skeleton { width: 55%; height: 44px; border-radius: 14px; }
+.msg-loading .ie-skeleton.mine { align-self: flex-end; width: 40%; }
+.msg-welcome { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 360px; margin: auto; padding: 24px; text-align: center; }
+.msg-welcome > span { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--ie-red-soft); color: var(--ie-red); font-size: 24px; }
+.msg-welcome strong { color: var(--ie-navy); font-size: 16px; }
+.msg-welcome p { margin: 0; color: var(--ie-muted); font-size: 13px; line-height: 1.5; }
+
+.msg-day { display: flex; justify-content: center; margin: 14px 0 8px; }
+.msg-day span { padding: 4px 12px; border-radius: 999px; background: #e9ecf0; color: #5d6771; font-size: 11.5px; font-weight: 700; text-transform: capitalize; }
+.msg-row { display: flex; align-items: flex-end; gap: 8px; max-width: 78%; }
+.msg-row.first { margin-top: 8px; }
+.msg-row.mine { align-self: flex-end; flex-direction: row-reverse; }
+.msg-row-avatar { width: 30px; flex: 0 0 30px; }
+.msg-bubble-wrap { display: flex; flex-direction: column; min-width: 0; }
+.msg-row.mine .msg-bubble-wrap { align-items: flex-end; }
+.msg-author { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 3px 4px; color: var(--ie-muted); font-size: 11.5px; font-weight: 700; }
+.msg-author em { padding: 0 5px; border-radius: 4px; background: var(--ie-navy-soft); color: var(--ie-navy); font-size: 9.5px; font-style: normal; text-transform: uppercase; }
+.msg-bubble {
+  position: relative; padding: 8px 12px 6px; border-radius: 16px; background: #fff; color: var(--ie-ink); font-size: 14px; line-height: 1.45;
+  box-shadow: 0 1px 2px #18283b14; overflow-wrap: anywhere;
 }
-@media (max-width: 420px) {
-  .ie-messaging-layout { min-height: 380px; }
-  .ie-conversation-item { padding: 12px; }
-  .ie-thread-input .ie-btn { padding: 9px 10px; }
+.msg-row:not(.mine) .msg-bubble { border-bottom-left-radius: 6px; }
+.msg-row.mine .msg-bubble { border-bottom-right-radius: 6px; background: var(--ie-navy); color: #fff; }
+.msg-row.bot .msg-bubble { background: #fff; border: 1px solid #dfe5ec; }
+.msg-row.pending .msg-bubble { opacity: 0.7; }
+.msg-bubble p { margin: 0; white-space: pre-line; }
+.msg-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; color: var(--ie-muted); font-size: 10.5px; }
+.msg-row.mine .msg-meta { color: #c6d1dc; }
+.msg-meta .read { color: #7fd1a3; }
+.msg-seen { margin: 3px 4px 0; color: var(--ie-muted); font-size: 11px; }
+.msg-image { display: block; max-width: 240px; max-height: 240px; margin: 2px 0 4px; border-radius: 10px; object-fit: cover; cursor: zoom-in; }
+.msg-doc {
+  display: flex; align-items: center; gap: 10px; min-width: 200px; margin: 2px 0 4px; padding: 8px 10px; border-radius: 10px;
+  background: #00000010; color: inherit; text-decoration: none;
+}
+.msg-doc > i:first-child { color: var(--ie-red); font-size: 22px; }
+.msg-row.mine .msg-doc > i:first-child { color: #fff; }
+.msg-doc span { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.msg-doc strong { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.msg-doc small { opacity: 0.75; font-size: 11px; }
+.msg-typing { display: inline-flex; gap: 4px; padding: 12px 14px; }
+.msg-typing span { width: 7px; height: 7px; border-radius: 50%; background: #9aa3ac; animation: msg-dot 1.2s infinite ease-in-out; }
+.msg-typing span:nth-child(2) { animation-delay: 0.15s; }
+.msg-typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes msg-dot { 0%, 80%, 100% { transform: translateY(0); opacity: 0.5; } 40% { transform: translateY(-4px); opacity: 1; } }
+.msg-jump {
+  position: absolute; left: 50%; bottom: 132px; z-index: 2; display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
+  border: 0; border-radius: 999px; background: var(--ie-navy); color: #fff; font-size: 12.5px; font-weight: 700; transform: translateX(-50%);
+  box-shadow: 0 6px 16px #0003; cursor: pointer; font-family: inherit;
+}
+
+.msg-composer { padding: 10px 16px 12px; border-top: 1px solid var(--ie-line); background: #fff; }
+.msg-quick { display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; }
+.msg-quick button {
+  flex-shrink: 0; padding: 7px 12px; border: 1px solid #d5dde6; border-radius: 999px; background: #fff; color: var(--ie-navy);
+  font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.msg-quick button:hover { border-color: var(--ie-navy); background: var(--ie-navy-soft); }
+.msg-attachment { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--ie-line); border-radius: 10px; background: #fafbfc; }
+.msg-attachment img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; }
+.msg-attachment > i { color: var(--ie-red); font-size: 20px; }
+.msg-attachment span { flex: 1; min-width: 0; overflow: hidden; color: var(--ie-navy); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.msg-attachment small { color: var(--ie-muted); }
+.msg-attachment button { width: 26px; height: 26px; border: 0; border-radius: 50%; background: var(--ie-navy); color: #fff; font-size: 11px; cursor: pointer; }
+.msg-input { display: flex; align-items: flex-end; gap: 8px; }
+.msg-input textarea {
+  flex: 1; min-width: 0; max-height: 140px; padding: 10px 14px; border: 1px solid var(--ie-line); border-radius: 20px; resize: none;
+  background: #f7f8fa; color: var(--ie-ink); font-size: 14px; line-height: 1.4; font-family: inherit;
+}
+.msg-input textarea:focus { outline: none; border-color: var(--ie-navy); background: #fff; }
+.msg-send { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border: 0; border-radius: 50%; background: var(--ie-red); color: #fff; font-size: 15px; cursor: pointer; }
+.msg-send:disabled { background: #d9dde2; cursor: default; }
+.msg-hint { display: block; margin-top: 6px; color: #a0a8b1; font-size: 11px; text-align: center; }
+
+.msg-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; padding: 30px; text-align: center; background: #f7f8fa; }
+.msg-empty > span { display: grid; place-items: center; width: 72px; height: 72px; border-radius: 50%; background: #fff; color: var(--ie-navy); font-size: 28px; box-shadow: var(--ie-shadow-sm); }
+.msg-empty strong { color: var(--ie-navy); font-size: 17px; }
+.msg-empty p { margin: 0 0 8px; color: var(--ie-muted); font-size: 13px; }
+
+@media (max-width: 900px) {
+  /* Mobile : liste OU conversation, en plein écran (au-dessus de la barre d'onglets). */
+  /* 68 px d'en-tête, 14 px de marge haute, 84 px réservés à la barre d'onglets. */
+  .msg { --msg-height: calc(100dvh - 166px - env(safe-area-inset-bottom)); display: block; border-radius: 14px; }
+  .msg-list, .msg-thread { height: 100%; }
+  .msg-list { border-right: 0; }
+  .msg-thread { display: none; }
+  .msg.has-active .msg-list { display: none; }
+  .msg.has-active .msg-thread { display: flex; }
+  .msg-back { display: grid; place-items: center; width: 36px; height: 36px; flex: 0 0 36px; border: 0; border-radius: 50%; background: var(--ie-navy-soft); color: var(--ie-navy); cursor: pointer; }
+  .msg-thread-head { padding: 10px 12px; gap: 10px; }
+  .msg-mode { display: none; }
+  .msg-messages { padding: 12px 12px 8px; }
+  .msg-row { max-width: 88%; }
+  .msg-composer { padding: 8px 10px 10px; }
+  .msg-hint { display: none; }
+  .msg-jump { bottom: 96px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-typing span { animation: none; }
 }
 </style>

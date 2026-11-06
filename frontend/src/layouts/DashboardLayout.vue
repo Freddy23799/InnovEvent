@@ -1,12 +1,14 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import logo from "../assets/images/logo-mark.png";
 import InstallPwaButton from "../components/InstallPwaButton.vue";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
 import NotificationBell from "../components/NotificationBell.vue";
+import PushPrompt from "../components/PushPrompt.vue";
 import { useFeatureFlags } from "../composables/useFeatureFlags";
 import { ACTOR_CATEGORY_GROUPS } from "../data/actorCategories";
+import { INTERIOR_DESIGN_CATEGORY_GROUPS } from "../data/interiorDesignCategories";
 import api from "../services/api";
 import { useAuthStore } from "../stores/auth";
 import { useMarketplaceAccessStore } from "../stores/marketplaceAccess";
@@ -83,6 +85,7 @@ const actorsMarketplaceSections = computed(() =>
     type: "group",
     label: group.title,
     icon: group.icon,
+    marketplace: "actors",
     locked: auth.role !== "admin" && isActorGroupLocked(group.featureKey),
     children: group.items.map((item) => ({
       label: item.label,
@@ -90,6 +93,32 @@ const actorsMarketplaceSections = computed(() =>
     })),
   }))
 );
+
+const interiorDesignSections = computed(() =>
+  auth.role === "admin" || marketplaceAccess.activeProfileSubscriptionTypes.has("interior_design")
+    ? INTERIOR_DESIGN_CATEGORY_GROUPS.map((group) => ({
+        type: "group",
+        label: `Déco · ${group.title}`,
+        icon: group.icon,
+        marketplace: "interior_design",
+        children: group.items.map((item) => ({
+          label: item.label,
+          to: { name: "premium-marketplace", query: { type: "interior_design", category: item.value } },
+        })),
+      }))
+    : []
+);
+
+// Une section titrée par marketplace souscrit : le client voit tout de suite
+// les métiers auxquels son abonnement donne accès.
+const marketplaceSections = computed(() => [
+  ...(actorsMarketplaceSections.value.length
+    ? [{ type: "heading", label: "Marketplace des acteurs", anchor: "nav-mp-actors", icon: "fa-solid fa-people-group" }, ...actorsMarketplaceSections.value]
+    : []),
+  ...(interiorDesignSections.value.length
+    ? [{ type: "heading", label: "Décoration & design", anchor: "nav-mp-interior_design", icon: "fa-solid fa-couch" }, ...interiorDesignSections.value]
+    : []),
+]);
 
 const ROLE_LABELS = {
   admin: "Administrateur", client: "Client", organizer: "Organisateur",
@@ -119,6 +148,7 @@ const navSections = computed(() => {
           { label: "Fonctionnalités & permissions", to: { name: "premium-marketplace-features-manage" } },
           { label: "Paliers d'abonnement", to: { name: "marketplace-tiers-manage" } },
           { label: "Demandes de réservation", to: { name: "premium-marketplace-booking-requests" } },
+          { label: "Commandes boutique", to: { name: "sale-orders" } },
           { label: "Prestataires", to: { name: "marketplace-badges-manage" } },
           { label: "Entreprises", to: { name: "companies-manage" } },
           { label: "Talents", to: { name: "talents-manage" } },
@@ -126,11 +156,12 @@ const navSections = computed(() => {
           { label: "Commissions", to: { name: "marketplace-commissions-manage" } },
         ],
       },
-      ...actorsMarketplaceSections.value,
+      ...marketplaceSections.value,
       {
         type: "group", label: "Gestion de stock", icon: "fa-solid fa-toolbox", children: [
           { label: "Inventaire matériel", to: { name: "equipment-manage" } },
           { label: "Mouvements de stock", to: { name: "stock-movements" } },
+          { label: "Locations boutique", to: { name: "sale-rentals" } },
           { label: "Dépenses", to: { name: "expenses" } },
         ],
       },
@@ -192,7 +223,9 @@ const navSections = computed(() => {
         : []),
       { type: "link", label: "Marché des événements", to: { name: "marketplace" }, icon: "fa-solid fa-store" },
       { type: "link", label: "Marketplace InnovEvent", to: { name: "premium-marketplace" }, icon: "fa-solid fa-crown" },
-      ...actorsMarketplaceSections.value,
+      { type: "link", label: "Boutique", to: { name: "sale-shop" }, icon: "fa-solid fa-bag-shopping" },
+      { type: "link", label: "Mes commandes", to: { name: "sale-orders" }, icon: "fa-solid fa-file-invoice" },
+      ...marketplaceSections.value,
       ...(hasProfileMarketplaceSubscription.value
         ? [
             { type: "link", label: "Mes demandes prestataires", to: { name: "my-booking-requests" }, icon: "fa-solid fa-clipboard-list" },
@@ -220,7 +253,9 @@ const navSections = computed(() => {
         ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
         : []),
       { type: "link", label: "Marketplace InnovEvent", to: { name: "premium-marketplace" }, icon: "fa-solid fa-crown" },
-      ...actorsMarketplaceSections.value,
+      { type: "link", label: "Boutique", to: { name: "sale-shop" }, icon: "fa-solid fa-bag-shopping" },
+      { type: "link", label: "Mes commandes", to: { name: "sale-orders" }, icon: "fa-solid fa-file-invoice" },
+      ...marketplaceSections.value,
       { type: "link", label: "Paiements", to: { name: "payments" }, icon: "fa-solid fa-credit-card" },
       { type: "link", label: "Parrainage", to: { name: "referral" }, icon: "fa-solid fa-user-plus" },
       { type: "link", label: "Messagerie", to: { name: "messaging" }, icon: "fa-solid fa-comments", badge: unreadMessages.value },
@@ -240,6 +275,7 @@ const navSections = computed(() => {
       ...(hasDriverProfile.value
         ? [{ type: "link", label: "Mon profil chauffeur", to: { name: "driver-profile" }, icon: "fa-solid fa-id-card" }]
         : []),
+      ...marketplaceSections.value,
       { type: "link", label: "Parrainage", to: { name: "referral" }, icon: "fa-solid fa-user-plus" },
       { type: "link", label: "Messagerie", to: { name: "messaging" }, icon: "fa-solid fa-comments", badge: unreadMessages.value },
     ];
@@ -300,10 +336,84 @@ const navSections = computed(() => {
       ? [{ type: "link", label: "Consulter les salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" }]
       : []),
     { type: "link", label: "Jeux", to: { name: "games" }, icon: "fa-solid fa-gamepad" },
+    ...marketplaceSections.value,
     { type: "link", label: "Parrainage", to: { name: "referral" }, icon: "fa-solid fa-user-plus" },
     { type: "link", label: "Messagerie", to: { name: "messaging" }, icon: "fa-solid fa-comments", badge: unreadMessages.value },
   ];
 });
+
+// Barre d'onglets mobile : les 4 accès les plus fréquents de chaque compte,
+// le reste du menu restant accessible via « Plus » (qui ouvre la sidebar).
+// L'administrateur garde uniquement la sidebar : liste vide = pas de barre.
+// Le Marketplace est l'onglet central, mis en avant pour tous les comptes
+// (hors administration) : c'est lui que la plateforme veut faire découvrir.
+const bottomTabs = computed(() => {
+  const home = { label: "Accueil", to: { name: "dashboard" }, icon: "fa-solid fa-house" };
+  const messages = { label: "Messages", to: { name: "messaging" }, icon: "fa-solid fa-comments", badge: unreadMessages.value };
+  const marketplace = {
+    label: "Marketplace", to: { name: "premium-marketplace" }, icon: "fa-solid fa-store", featured: true,
+    // La boutique fait partie du Marketplace.
+    alsoActive: ["/app/boutique"],
+  };
+
+  if (auth.role === "admin") return [];
+  if (auth.role === "client") {
+    return [
+      home,
+      { label: "Événement", to: { name: "events" }, icon: "fa-solid fa-calendar-week" },
+      marketplace,
+      { label: "Salles", to: { name: "venues" }, icon: "fa-solid fa-building-columns" },
+    ];
+  }
+  if (auth.role === "organizer") {
+    return [
+      home,
+      { label: "Événements", to: { name: "events" }, icon: "fa-solid fa-calendar-week" },
+      marketplace,
+      { label: "Billetterie", to: { name: "tickets" }, icon: "fa-solid fa-ticket" },
+    ];
+  }
+  if (auth.role === "employee") {
+    return [
+      home,
+      { label: "Livraisons", to: { name: "my-deliveries" }, icon: "fa-solid fa-truck-fast" },
+      marketplace,
+      { label: "Mes billets", to: { name: "my-tickets" }, icon: "fa-solid fa-ticket" },
+    ];
+  }
+  if (auth.role === "partner") {
+    if (hasTalentProfile.value) {
+      return [
+        { label: "Mon profil", to: { name: "talent-profile" }, icon: "fa-solid fa-star" },
+        marketplace,
+        messages,
+      ];
+    }
+    return [
+      home,
+      { label: "Devis", to: { name: "provider-quote-requests" }, icon: "fa-solid fa-file-invoice" },
+      marketplace,
+      { label: "Talents", to: { name: "talents-directory" }, icon: "fa-solid fa-users" },
+    ];
+  }
+  // participant
+  return [
+    home,
+    { label: "Billets", to: { name: "marketplace" }, icon: "fa-solid fa-ticket" },
+    marketplace,
+    { label: "Mes billets", to: { name: "my-tickets" }, icon: "fa-solid fa-qrcode" },
+  ];
+});
+const hasBottomTabs = computed(() => bottomTabs.value.length > 0);
+
+function isTabActive(tab) {
+  // Le dashboard est la route racine /app : sans comparaison exacte, il
+  // serait « actif » sur toutes les pages de l'espace.
+  const target = router.resolve(tab.to).path;
+  if (tab.to.name === "dashboard") return route.path === target || route.path === `${target}/`;
+  if (tab.alsoActive?.some((prefix) => route.path === prefix || route.path.startsWith(`${prefix}/`))) return true;
+  return route.path === target || route.path.startsWith(`${target}/`);
+}
 
 const accountItems = [
   { label: "Profil", to: { name: "profile" }, icon: "fa-solid fa-user" },
@@ -322,6 +432,25 @@ function isChildActive(child) {
 function isGroupActive(group) {
   return group.children.some(isChildActive);
 }
+
+// Après un abonnement (ou « Explorer »), on ouvre la sidebar directement sur
+// la section du marketplace, première famille de métiers dépliée.
+watch(
+  () => marketplaceAccess.reveal.token,
+  async () => {
+    const type = marketplaceAccess.reveal.type;
+    const firstGroup = navSections.value.find((item) => item.type === "group" && item.marketplace === type && !item.locked);
+    if (!firstGroup) return;
+    Object.keys(openGroups).forEach((key) => { openGroups[key] = false; });
+    openGroups[firstGroup.label] = true;
+    sidebarOpen.value = true;
+    await nextTick();
+    const heading = document.getElementById(`nav-mp-${type}`);
+    heading?.scrollIntoView({ behavior: "smooth", block: "start" });
+    heading?.classList.add("is-highlighted");
+    setTimeout(() => heading?.classList.remove("is-highlighted"), 2200);
+  },
+);
 
 function toggleGroup(label) {
   // Accordéon : ouvrir un groupe referme automatiquement les autres, sinon
@@ -367,7 +496,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ie-shell">
+  <div class="ie-shell" :class="{ 'has-bottom-tabs': hasBottomTabs }">
     <button class="ie-mobile-toggle" :aria-expanded="sidebarOpen" aria-controls="dashboard-navigation" @click="sidebarOpen = !sidebarOpen" :aria-label="sidebarOpen ? 'Fermer le menu' : 'Ouvrir le menu'">
       <i :class="sidebarOpen ? 'fa-solid fa-xmark' : 'fa-solid fa-bars'" aria-hidden="true"></i>
     </button>
@@ -384,8 +513,11 @@ onBeforeUnmount(() => {
 
       <nav class="ie-nav">
         <template v-for="item in navSections" :key="item.label">
+          <p v-if="item.type === 'heading'" :id="item.anchor" class="ie-nav-heading">
+            <i :class="item.icon"></i> {{ item.label }}
+          </p>
           <router-link
-            v-if="item.type === 'link'"
+            v-else-if="item.type === 'link'"
             :to="item.to"
             class="ie-nav-link"
             @click="sidebarOpen = false"
@@ -465,6 +597,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
       <main class="ie-content">
+        <PushPrompt />
         <!-- Clé par chemin : chaque écran entre en fondu, et un écran de détail
              (/talents/1 → /talents/2) est bien rechargé. -->
         <router-view v-slot="{ Component, route: current }">
@@ -474,6 +607,35 @@ onBeforeUnmount(() => {
         </router-view>
       </main>
     </div>
+
+    <nav v-if="hasBottomTabs" class="ie-bottom-tabs" aria-label="Navigation rapide">
+      <router-link
+        v-for="tab in bottomTabs"
+        :key="tab.label"
+        :to="tab.to"
+        class="ie-bottom-tab"
+        :class="{ 'is-active': isTabActive(tab), 'is-featured': tab.featured }"
+        active-class="" exact-active-class=""
+        @click="sidebarOpen = false"
+      >
+        <span class="ie-bottom-tab-icon">
+          <i :class="tab.icon" aria-hidden="true"></i>
+          <span v-if="tab.badge" class="ie-bottom-tab-badge">{{ tab.badge > 99 ? "99+" : tab.badge }}</span>
+        </span>
+        <span class="ie-bottom-tab-label">{{ tab.label }}</span>
+      </router-link>
+      <button
+        type="button"
+        class="ie-bottom-tab"
+        :class="{ 'is-active': sidebarOpen }"
+        :aria-expanded="sidebarOpen"
+        aria-controls="dashboard-navigation"
+        @click="sidebarOpen = !sidebarOpen"
+      >
+        <span class="ie-bottom-tab-icon"><i class="fa-solid fa-table-cells-large" aria-hidden="true"></i></span>
+        <span class="ie-bottom-tab-label">Plus</span>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -518,6 +680,13 @@ onBeforeUnmount(() => {
 }
 
 .ie-nav-group-toggle { justify-content: flex-start; }
+.ie-nav-heading {
+  display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; padding: 8px 10px 6px; border-top: 1px solid var(--ie-line);
+  color: var(--ie-muted); font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  scroll-margin-top: 8px; transition: background-color 0.3s ease, color 0.3s ease;
+}
+.ie-nav-heading i { color: var(--ie-red); font-size: 12px; }
+.ie-nav-heading.is-highlighted { border-radius: 8px; background: var(--ie-red-soft); color: var(--ie-red); }
 .ie-nav-chevron { transition: transform 0.15s ease; color: var(--ie-muted); font-size: 15px; }
 .ie-nav-chevron.open { transform: rotate(90deg); }
 .ie-nav-children { display: flex; flex-direction: column; padding-left: 30px; gap: 1px; margin: 2px 0 4px; }
@@ -596,6 +765,59 @@ onBeforeUnmount(() => {
   .ie-topbar-title { max-width: 38vw; }
   .ie-topbar-actions { gap: 5px; }
   .ie-mobile-toggle { left: 10px; width: 40px; height: 40px; }
+}
+
+.ie-bottom-tabs { display: none; }
+
+@media (max-width: 900px) {
+  /* « Plus » remplace le bouton hamburger quand la barre d'onglets existe. */
+  .has-bottom-tabs .ie-mobile-toggle { display: none; }
+  .has-bottom-tabs .ie-topbar { padding-left: 16px; }
+  .has-bottom-tabs .ie-content { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  /* La sidebar s'arrête au-dessus de la barre pour que « Plus » reste cliquable. */
+  .has-bottom-tabs .ie-sidebar,
+  .has-bottom-tabs .ie-sidebar-scrim { bottom: calc(64px + env(safe-area-inset-bottom)); }
+
+  .ie-bottom-tabs {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    height: calc(64px + env(safe-area-inset-bottom));
+    padding: 0 4px env(safe-area-inset-bottom);
+    background: #fff; border-top: 1px solid var(--ie-line);
+    box-shadow: 0 -4px 18px rgba(20, 30, 40, .06);
+  }
+  .ie-bottom-tab {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; border: 0; background: transparent; cursor: pointer; font-family: inherit;
+    color: var(--ie-muted); -webkit-tap-highlight-color: transparent;
+  }
+  .ie-bottom-tab-icon { position: relative; font-size: 19px; line-height: 1; }
+  .ie-bottom-tab-label {
+    font-size: 11px; font-weight: 600; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ie-bottom-tab.is-active { color: var(--ie-red); }
+  /* Onglet Marketplace : bouton central rouge, surélevé. */
+  .ie-bottom-tab.is-featured { color: var(--ie-navy); }
+  .ie-bottom-tab.is-featured .ie-bottom-tab-icon {
+    display: grid; place-items: center; width: 52px; height: 52px; margin-top: -26px;
+    border: 4px solid #fff; border-radius: 50%; background: var(--ie-red); color: #fff; font-size: 20px;
+    box-shadow: 0 8px 18px rgba(192, 39, 45, 0.35); transition: transform 0.15s ease;
+  }
+  .ie-bottom-tab.is-featured:active .ie-bottom-tab-icon { transform: scale(0.94); }
+  .ie-bottom-tab.is-featured .ie-bottom-tab-label { font-weight: 800; }
+  .ie-bottom-tab.is-featured.is-active { color: var(--ie-red); }
+  .ie-bottom-tab.is-featured.is-active .ie-bottom-tab-icon { box-shadow: 0 0 0 3px var(--ie-red-soft), 0 8px 18px rgba(192, 39, 45, 0.35); }
+  .ie-bottom-tab.is-active .ie-bottom-tab-label { font-weight: 800; }
+  .ie-bottom-tab-badge {
+    position: absolute; top: -7px; right: -11px;
+    background: var(--ie-red); color: #fff; font-size: 10px; font-weight: 800;
+    border-radius: 999px; min-width: 16px; height: 16px; padding: 0 4px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .has-bottom-tabs .ie-topbar { padding-left: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

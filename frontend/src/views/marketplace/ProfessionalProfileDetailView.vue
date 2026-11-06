@@ -6,10 +6,16 @@ import StarRating from "../../components/StarRating.vue";
 import { useFeatureFlags } from "../../composables/useFeatureFlags";
 import api from "../../services/api";
 import { useAuthStore } from "../../stores/auth";
+import { useLightboxStore } from "../../stores/lightbox";
 
 const props = defineProps({ id: { type: [String, Number], required: true } });
 const router = useRouter();
 const auth = useAuthStore();
+const lightbox = useLightboxStore();
+
+function openPortfolio(index) {
+  lightbox.openGallery(profile.value.portfolio_items.map((p) => ({ url: p.image, caption: p.caption })), index);
+}
 
 const loading = ref(true);
 const notFound = ref(false);
@@ -82,6 +88,13 @@ const bookingSubmitting = ref(false);
 const bookingError = ref("");
 const bookingSent = ref(false);
 const bookingPanelRef = ref(null);
+// Prix « à partir de » : le plus bas des services à prix fixe.
+const startingPrice = computed(() => {
+  const prices = (profile.value?.services || [])
+    .filter((s) => s.pricing_type === "fixed" && s.price_from != null)
+    .map((s) => Number(s.price_from));
+  return prices.length ? Math.min(...prices) : null;
+});
 
 // --- Matériel souhaité (facultatif) : le client peut joindre une liste de
 // matériel (chaises, tables, projecteur...) à sa demande de devis, plutôt que
@@ -227,28 +240,11 @@ onMounted(async () => {
 
 <template>
   <div>
-    <div class="ie-page-header">
-      <div class="ie-page-header-actions">
-        <button type="button" class="ie-btn ie-btn-ghost" @click="goBack">
-          <i class="fa-solid fa-arrow-left"></i> Retour au marketplace
-        </button>
-        <button
-          v-if="profile && isUsable('favorites')" type="button" class="ie-btn ie-btn-ghost"
-          :class="{ 'ie-favorited': profile.is_favorited }" :disabled="favoriteBusy" @click="toggleFavorite"
-        >
-          <i :class="profile.is_favorited ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
-          {{ profile.is_favorited ? "Dans mes favoris" : "Ajouter aux favoris" }}
-        </button>
-        <button
-          v-if="profile && !profile.is_owner && isUsable('contact')" type="button" class="ie-btn ie-btn-secondary"
-          :disabled="contactBusy" @click="contactProvider"
-        >
-          <i class="fa-solid fa-comment-dots"></i> {{ contactBusy ? "Connexion…" : "Contacter le prestataire" }}
-        </button>
-      </div>
-    </div>
+    <button type="button" class="pd-back" @click="goBack">
+      <i class="fa-solid fa-arrow-left"></i> Retour au marketplace
+    </button>
 
-    <div v-if="loading" class="ie-skeleton" style="height: 320px;"></div>
+    <div v-if="loading" class="ie-skeleton" style="height: 320px; border-radius: 18px;"></div>
 
     <EmptyState
       v-else-if="notFound" icon="fa-solid fa-lock"
@@ -256,38 +252,66 @@ onMounted(async () => {
     />
 
     <template v-else-if="profile">
-      <div class="ie-pro-detail-cover" :class="{ 'has-photo': profile.cover_photo }">
-        <div class="ie-pro-detail-cover-img">
+      <!-- En-tête : couverture, identité et actions, dans le flux (aucun
+           chevauchement quand le nom ou les badges passent à la ligne). -->
+      <section class="pd-hero">
+        <div class="pd-cover" :class="{ empty: !profile.cover_photo }">
           <img v-if="profile.cover_photo" v-img.eager="profile.cover_photo" :alt="profile.business_name" />
         </div>
-        <div class="ie-pro-detail-header">
-          <div class="ie-pro-detail-logo">
+        <div class="pd-identity">
+          <div class="pd-logo">
             <img v-if="profile.logo" v-img.eager="profile.logo" :alt="profile.business_name" />
             <i v-else class="fa-solid fa-handshake"></i>
           </div>
-          <div>
-            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <h1 style="margin: 0;">{{ profile.business_name }}</h1>
-              <span v-if="profile.is_verified" class="ie-badge ie-badge-success"><i class="fa-solid fa-circle-check"></i> Vérifié</span>
+          <div class="pd-id-text">
+            <span class="pd-category">{{ profile.category_display }}</span>
+            <h1>
+              {{ profile.business_name }}
+              <i v-if="profile.is_verified" class="fa-solid fa-circle-check pd-verified" :title="profile.verification_status_display || 'Vérifié'"></i>
+            </h1>
+            <p class="pd-subline">
+              <span v-if="profile.city"><i class="fa-solid fa-location-dot"></i> {{ [profile.neighborhood, profile.city].filter(Boolean).join(", ") }}</span>
+              <span v-if="profile.client_type_display"><i class="fa-solid fa-user-tie"></i> {{ profile.client_type_display }}</span>
+            </p>
+            <div v-if="profile.is_verified || profile.is_top || profile.is_recommended || profile.price_range" class="pd-badges">
+              <span v-if="profile.is_verified" class="ie-badge ie-badge-success"><i class="fa-solid fa-shield-halved"></i> {{ profile.verification_status_display || "Vérifié" }}</span>
               <span v-if="profile.is_top" class="ie-badge ie-badge-top"><i class="fa-solid fa-trophy"></i> Top prestataire</span>
               <span v-if="profile.is_recommended" class="ie-badge ie-badge-recommended"><i class="fa-solid fa-star"></i> Recommandé</span>
               <span v-if="profile.price_range" class="ie-badge ie-badge-neutral">{{ profile.price_range }}</span>
             </div>
-            <p class="ie-page-subtitle" style="margin: 4px 0 0;">
-              {{ profile.category_display }}
-              <template v-if="profile.city"> · <i class="fa-solid fa-location-dot"></i> {{ [profile.neighborhood, profile.city].filter(Boolean).join(', ') }}</template>
-              <template v-if="profile.client_type_display"> · <i class="fa-solid fa-user-tie"></i> {{ profile.client_type_display }}</template>
-            </p>
-            <div class="ie-pro-meta" style="margin-top: 8px; align-items: center;">
-              <StarRating v-if="profile.average_rating" :model-value="profile.average_rating" :count="profile.review_count" />
-              <span v-if="profile.review_count" style="font-size: 11.5px; color: var(--ie-muted);">
-                <i class="fa-solid fa-shield-check"></i> Avis vérifiés
-              </span>
-              <span>{{ profile.services.length }} service{{ profile.services.length > 1 ? 's' : '' }}</span>
-            </div>
+          </div>
+          <div class="pd-actions">
+            <button
+              v-if="isUsable('book') && !profile.is_owner" type="button" class="ie-btn ie-btn-primary"
+              @click="bookingPanelRef?.scrollIntoView({ behavior: 'smooth', block: 'start' })"
+            >
+              <i class="fa-solid fa-file-invoice"></i> Demander un devis
+            </button>
+            <button
+              v-if="!profile.is_owner && isUsable('contact')" type="button" class="ie-btn ie-btn-secondary"
+              :disabled="contactBusy" @click="contactProvider"
+            >
+              <i class="fa-solid fa-comment-dots"></i> {{ contactBusy ? "Connexion…" : "Message" }}
+            </button>
+            <button
+              v-if="isUsable('favorites')" type="button" class="pd-icon-btn" :class="{ 'is-on': profile.is_favorited }"
+              :disabled="favoriteBusy" :aria-label="profile.is_favorited ? 'Retirer des favoris' : 'Ajouter aux favoris'" @click="toggleFavorite"
+            >
+              <i :class="profile.is_favorited ? 'fa-solid fa-heart' : 'fa-regular fa-heart'"></i>
+            </button>
           </div>
         </div>
-      </div>
+        <dl class="pd-facts">
+          <div>
+            <dt>Note</dt>
+            <dd><i class="fa-solid fa-star pd-star"></i> {{ profile.average_rating ? Number(profile.average_rating).toFixed(1) : "Nouveau" }}</dd>
+          </div>
+          <div><dt>Avis</dt><dd>{{ profile.review_count || 0 }}</dd></div>
+          <div><dt>Services</dt><dd>{{ profile.services.length }}</dd></div>
+          <div><dt>À partir de</dt><dd>{{ startingPrice ? `${startingPrice.toLocaleString("fr-FR")} FCFA` : "Sur devis" }}</dd></div>
+          <div><dt>Réalisations</dt><dd>{{ profile.portfolio_items.length }}</dd></div>
+        </dl>
+      </section>
 
       <div class="ie-pro-detail-grid">
         <div>
@@ -309,7 +333,7 @@ onMounted(async () => {
             </p>
           </div>
 
-          <div class="ie-card ie-card-body" style="margin-top: 20px;" v-if="isVisible('view_services')">
+          <div class="ie-card ie-card-body" v-if="isVisible('view_services')">
             <h2><i class="fa-solid fa-concierge-bell ie-section-icon"></i>Services proposés</h2>
             <div v-if="!isUsable('view_services')" class="ie-upsell-block">
               <i class="fa-solid fa-lock"></i>
@@ -341,7 +365,7 @@ onMounted(async () => {
             </template>
           </div>
 
-          <div class="ie-card ie-card-body" style="margin-top: 20px;" v-if="isVisible('availability_calendar')">
+          <div class="ie-card ie-card-body" v-if="isVisible('availability_calendar')">
             <h2><i class="fa-solid fa-calendar-check ie-section-icon"></i>Disponibilités</h2>
             <div v-if="!isUsable('availability_calendar')" class="ie-upsell-block">
               <i class="fa-solid fa-lock"></i>
@@ -375,10 +399,10 @@ onMounted(async () => {
             </template>
           </div>
 
-          <div class="ie-card ie-card-body" style="margin-top: 20px;" v-if="profile.portfolio_items.length">
+          <div class="ie-card ie-card-body" v-if="profile.portfolio_items.length">
             <h2><i class="fa-solid fa-images ie-section-icon"></i>Réalisations</h2>
             <div class="ie-portfolio-grid">
-              <div v-for="p in profile.portfolio_items" :key="p.id" class="ie-portfolio-item">
+              <div v-for="(p, index) in profile.portfolio_items" :key="p.id" class="ie-portfolio-item" @click="openPortfolio(index)">
                 <div v-if="p.before_image" class="ie-portfolio-before-after">
                   <img v-img="p.before_image" alt="Avant" />
                   <img v-img="p.image" :alt="p.caption" />
@@ -391,7 +415,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="ie-card ie-card-body" style="margin-top: 20px;" v-if="isVisible('reviews')">
+          <div class="ie-card ie-card-body" v-if="isVisible('reviews')">
             <h2><i class="fa-solid fa-star ie-section-icon"></i>Avis clients</h2>
             <form v-if="!myReview" @submit.prevent="submitReview" style="margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--ie-line);">
               <label class="ie-label">Votre note</label>
@@ -502,25 +526,47 @@ onMounted(async () => {
 .ie-requested-item-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .ie-requested-item-row .ie-select { flex: 1; }
 
-.ie-pro-detail-cover { position: relative; margin-bottom: 52px; height: 90px; }
-.ie-pro-detail-cover.has-photo { height: 220px; }
-.ie-pro-detail-cover-img { position: absolute; inset: 0; border-radius: 14px; overflow: hidden; background: var(--ie-navy-soft); }
-.ie-pro-detail-cover-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ie-pro-detail-header {
-  position: absolute; left: 0; right: 0; bottom: -44px; padding: 0 24px;
-  display: flex; align-items: flex-end; gap: 18px;
-}
-.ie-pro-detail-cover:not(.has-photo) .ie-pro-detail-header { align-items: center; }
-.ie-pro-detail-logo {
-  width: 96px; height: 96px; border-radius: 16px; overflow: hidden; background: #fff;
-  border: 4px solid #fff; box-shadow: 0 4px 14px rgba(0,0,0,0.18); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-}
-.ie-pro-detail-logo img { width: 100%; height: 100%; object-fit: cover; }
-.ie-pro-detail-logo i { font-size: 30px; color: var(--ie-navy); opacity: 0.35; }
 .ie-pro-meta { display: flex; gap: 14px; font-size: 12.5px; color: var(--ie-muted); }
 
-.ie-pro-detail-grid { display: grid; grid-template-columns: 1fr 300px; gap: 20px; align-items: flex-start; }
+.pd-back {
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 6px 2px; border: 0; background: none;
+  color: var(--ie-muted); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.pd-back:hover { color: var(--ie-navy); }
+
+.pd-hero { overflow: hidden; margin-bottom: 20px; border: 1px solid var(--ie-line); border-radius: 18px; background: #fff; box-shadow: var(--ie-shadow-sm); }
+.pd-cover { height: 220px; background: var(--ie-hero-gradient); }
+.pd-cover.empty { height: 110px; }
+.pd-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pd-identity { display: flex; align-items: flex-end; gap: 18px; padding: 0 24px 18px; }
+.pd-logo {
+  display: grid; place-items: center; width: 104px; height: 104px; flex: 0 0 104px; margin-top: -52px; overflow: hidden;
+  border: 4px solid #fff; border-radius: 20px; background: #fff; color: var(--ie-navy); font-size: 30px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+}
+.pd-logo img { width: 100%; height: 100%; object-fit: cover; }
+.pd-logo i { opacity: 0.35; }
+.pd-id-text { flex: 1; min-width: 0; padding-top: 14px; }
+.pd-category { display: inline-block; max-width: 100%; padding: 3px 10px; overflow: hidden; border-radius: 999px; background: var(--ie-navy-soft); color: var(--ie-navy); font-size: 11px; font-weight: 800; letter-spacing: 0.03em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.pd-id-text h1 { margin: 8px 0 4px; color: var(--ie-ink); font-size: clamp(21px, 2.6vw, 28px); line-height: 1.2; overflow-wrap: anywhere; }
+.pd-verified { margin-left: 4px; color: var(--ie-success); font-size: 0.7em; vertical-align: middle; }
+.pd-subline { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; color: var(--ie-muted); font-size: 13px; }
+.pd-subline i { margin-right: 4px; color: var(--ie-red); font-size: 11px; }
+.pd-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pd-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.pd-icon-btn {
+  display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border: 1px solid var(--ie-line); border-radius: 10px;
+  background: #fff; color: var(--ie-navy); font-size: 16px; cursor: pointer;
+}
+.pd-icon-btn:hover, .pd-icon-btn.is-on { border-color: var(--ie-red); color: var(--ie-red); }
+.pd-facts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--ie-line); background: #fafbfc; }
+.pd-facts div { padding: 12px 16px; min-width: 0; }
+.pd-facts div + div { border-left: 1px solid var(--ie-line); }
+.pd-facts dt { color: var(--ie-muted); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.pd-facts dd { margin: 2px 0 0; overflow: hidden; color: var(--ie-navy); font-size: 15px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.pd-star { color: #f5a623; font-size: 13px; }
+
+.ie-pro-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: flex-start; }
+.ie-pro-detail-grid > div > .ie-card + .ie-card { margin-top: 20px; }
 .ie-section-icon { color: var(--ie-red); margin-right: 8px; font-size: 15px; }
 
 .ie-pro-contact-card { position: sticky; top: 20px; box-shadow: 0 10px 26px rgba(23, 27, 38, 0.08); }
@@ -566,7 +612,7 @@ onMounted(async () => {
 .ie-service-info span { font-size: 12px; color: var(--ie-red); font-weight: 600; }
 
 .ie-portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
-.ie-portfolio-item { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; }
+.ie-portfolio-item { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; cursor: zoom-in; }
 .ie-portfolio-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.25s ease; }
 .ie-portfolio-item:hover img { transform: scale(1.06); }
 .ie-portfolio-before-after { position: relative; width: 100%; height: 100%; display: flex; }
@@ -579,8 +625,36 @@ onMounted(async () => {
   background: linear-gradient(to top, rgba(0,0,0,0.65), transparent);
 }
 
+@media (hover: none) {
+  .ie-service-row:hover { border-color: var(--ie-line); box-shadow: none; }
+  .ie-portfolio-item:hover img { transform: none; }
+}
+@media (max-width: 980px) {
+  .pd-identity { flex-wrap: wrap; }
+  .pd-actions { width: 100%; }
+  .pd-actions .ie-btn { flex: 1; justify-content: center; }
+  .pd-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pd-facts div:nth-child(4) { border-left: 0; }
+  .pd-facts div:nth-child(n + 4) { border-top: 1px solid var(--ie-line); }
+}
 @media (max-width: 860px) {
   .ie-pro-detail-grid { grid-template-columns: 1fr; }
   .ie-pro-contact-card { position: static; }
+}
+@media (max-width: 560px) {
+  .pd-cover { height: 150px; }
+  .pd-cover.empty { height: 80px; }
+  .pd-identity { flex-direction: column; align-items: flex-start; gap: 6px; padding: 0 16px 16px; }
+  .pd-logo { width: 84px; height: 84px; flex-basis: 84px; margin-top: -42px; border-radius: 16px; }
+  .pd-id-text { padding-top: 4px; }
+  .pd-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pd-facts div { padding: 10px 14px; }
+  .pd-facts div:nth-child(n) { border-left: 0; border-top: 1px solid var(--ie-line); }
+  .pd-facts div:nth-child(even) { border-left: 1px solid var(--ie-line); }
+  .pd-facts div:nth-child(-n + 2) { border-top: 0; }
+  .pd-facts div:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .ie-service-row { align-items: flex-start; }
+  .ie-calendar-cell { height: 30px; font-size: 11px; }
+  .ie-requested-item-row { flex-wrap: wrap; }
 }
 </style>

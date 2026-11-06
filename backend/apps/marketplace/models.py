@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.conf import settings
 from django.db import models
@@ -13,6 +13,22 @@ class MarketplaceType(models.TextChoices):
     ACTORS = "actors", "Marketplace des acteurs"
     VENUES = "venues", "Salles de réception"
     TALENT_MISSIONS = "talent_missions", "Visibilité talent"
+
+
+class SaleCategory(models.TextChoices):
+    """Grands rayons de la boutique (Marketplace vente). Les sous-catégories
+    (verres, chaises, tables…) sont décrites côté frontend
+    (`data/saleCategories.js`) et stockées dans `MarketplaceListing.subcategory`."""
+
+    FURNITURE = "furniture", "Mobilier"
+    TABLEWARE = "tableware", "Art de la table"
+    TEXTILE = "textile", "Linge & textile"
+    DECORATION = "decoration", "Décoration"
+    LIGHTING = "lighting", "Éclairage"
+    SOUND = "sound", "Son & vidéo"
+    STRUCTURE = "structure", "Structures & scènes"
+    CATERING = "catering", "Traiteur & service"
+    OTHER = "other", "Autre"
 
 
 class CommissionSettings(models.Model):
@@ -88,6 +104,9 @@ class MarketplaceSubscription(models.Model):
     renewed_at = models.DateTimeField(
         null=True, blank=True, help_text="Dernier paiement réussi — bloque un second paiement accidentel juste après.",
     )
+    expiry_reminded_at = models.DateTimeField(
+        null=True, blank=True, help_text="Relance « abonnement bientôt expiré » envoyée (pour l'échéance en cours).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -137,6 +156,23 @@ class MarketplaceListing(models.Model):
         ),
     )
     order = models.PositiveIntegerField(default=0)
+    # Boutique (Marketplace vente) uniquement.
+    category = models.CharField(max_length=20, choices=SaleCategory.choices, blank=True)
+    subcategory = models.CharField(max_length=40, blank=True, help_text="Sous-catégorie du rayon (ex : chaises, verres).")
+    # Boutique : un produit peut être vendu, loué, ou les deux.
+    is_for_sale = models.BooleanField(default=True, help_text="Proposé à l'achat (au prix `price`).")
+    is_for_rent = models.BooleanField(default=True, help_text="Proposé à la location (au prix par jour).")
+    rental_price_per_day = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text="Prix de location par jour et par pièce. Vide = calculé automatiquement (10 % du prix d'achat).",
+    )
+    equipment = models.ForeignKey(
+        "equipment.Equipment", on_delete=models.SET_NULL, null=True, blank=True, related_name="shop_listings",
+        help_text="Article d'inventaire lié : le stock du produit suit alors la gestion de stock de l'administration.",
+    )
+    stock = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Nombre de pièces disponibles. Vide = stock non suivi (toujours commandable).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -145,6 +181,140 @@ class MarketplaceListing(models.Model):
 
     def __str__(self):
         return f"[{self.get_marketplace_type_display()}] {self.title}"
+
+    # Location sans prix fixé : 10 % du prix d'achat par jour (ex. 2 500 → 250),
+    # arrondi à 50 FCFA près.
+    DEFAULT_RENTAL_RATE = Decimal("0.10")
+    RENTAL_ROUNDING = Decimal("50")
+
+    @property
+    def rental_price(self):
+        """Prix de location effectif par jour et par pièce (`None` si non loué)."""
+        if not self.is_for_rent:
+            return None
+        if self.rental_price_per_day:
+            return self.rental_price_per_day
+        computed = (self.price * self.DEFAULT_RENTAL_RATE / self.RENTAL_ROUNDING).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * self.RENTAL_ROUNDING
+        return max(computed, self.RENTAL_ROUNDING)
+
+
+class MarketplaceListingPhoto(models.Model):
+    """Photos supplémentaires d'un produit de la boutique (la photo principale
+    reste `MarketplaceListing.photo`)."""
+
+    listing = models.ForeignKey(MarketplaceListing, on_delete=models.CASCADE, related_name="photos")
+    image = models.ImageField(upload_to="marketplace/", validators=[validate_image_file])
+    order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+
+class SaleOrder(models.Model):
+    """Commande panier de la boutique (Marketplace vente) : plusieurs produits,
+    une facture. Aucun paiement en ligne à la commande — la facture est émise
+    « À payer » et l'administration la marque payée (paiement ultérieur ou à
+    la livraison)."""
+
+    class Status(models.TextChoices):
+        PENDING_PAYMENT = "pending_payment", "À payer"
+        PAID = "paid", "Payée"
+        CANCELLED = "cancelled", "Annulée"
+
+    class OrderType(models.TextChoices):
+        PURCHASE = "purchase", "Achat"
+        RENTAL = "rental", "Location"
+
+    class RentalStatus(models.TextChoices):
+        RESERVED = "reserved", "Réservée"
+        OUT = "out", "Sortie / livrée"
+        RETURNED = "returned", "Retournée"
+
+    number = models.CharField(max_length=20, unique=True, blank=True)
+    order_type = models.CharField(max_length=10, choices=OrderType.choices, default=OrderType.PURCHASE)
+    # Location uniquement : période (dates incluses) et suivi du matériel.
+    rental_start = models.DateField(null=True, blank=True)
+    rental_end = models.DateField(null=True, blank=True)
+    rental_days = models.PositiveIntegerField(null=True, blank=True)
+    rental_status = models.CharField(max_length=10, choices=RentalStatus.choices, blank=True)
+    out_at = models.DateTimeField(null=True, blank=True)
+    returned_at = models.DateTimeField(null=True, blank=True)
+    return_notes = models.TextField(blank=True)
+    payment_reminded_at = models.DateTimeField(null=True, blank=True, help_text="Relance « facture à payer » envoyée.")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sale_orders")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING_PAYMENT)
+    currency = models.CharField(max_length=3, default="XAF")
+    total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    delivery_name = models.CharField(max_length=150)
+    delivery_phone = models.CharField(max_length=30)
+    delivery_city = models.CharField(max_length=100)
+    delivery_address = models.TextField()
+    notes = models.TextField(blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.number or f"Commande #{self.pk}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if not self.number:
+            # Numéro dérivé de la clé primaire : unique sans compteur à verrouiller.
+            self.number = f"FAC-{self.created_at:%Y}-{self.pk:05d}"
+            super().save(update_fields=["number"])
+
+
+class CartSnapshot(models.Model):
+    """Copie serveur du panier de la boutique (le panier vit dans le
+    navigateur) : permet à l'assistant de relancer un panier abandonné."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="shop_cart")
+    items = models.JSONField(default=list)
+    mode = models.CharField(max_length=10, default="purchase")
+    item_count = models.PositiveIntegerField(default=0)
+    total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, default="XAF")
+    updated_at = models.DateTimeField(auto_now=True)
+    reminded_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Panier de {self.user} ({self.item_count} pièce(s))"
+
+
+class SaleOrderItem(models.Model):
+    """Ligne de facture — titre et prix figés au moment de la commande, pour
+    qu'une modification ultérieure du produit ne change pas la facture."""
+
+    order = models.ForeignKey(SaleOrder, on_delete=models.CASCADE, related_name="items")
+    listing = models.ForeignKey(MarketplaceListing, on_delete=models.SET_NULL, null=True, related_name="sale_order_items")
+    title = models.CharField(max_length=200)
+    # Achat : prix unitaire. Location : prix par jour et par pièce.
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    quantity = models.PositiveIntegerField()
+    days = models.PositiveIntegerField(default=1)
+    line_total = models.DecimalField(max_digits=14, decimal_places=2)
+    # Constatés au retour d'une location.
+    damaged_quantity = models.PositiveIntegerField(default=0)
+    lost_quantity = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["id"]
+
+    @property
+    def label(self):
+        if self.order.order_type == SaleOrder.OrderType.RENTAL:
+            return f"{self.title} (location {self.days} j)"
+        return self.title
+
+    @property
+    def pdf_unit_price(self):
+        """Prix d'une pièce sur toute la période — colonne « prix unit. » de la facture."""
+        return self.unit_price * self.days
 
 
 class MarketplaceOrder(models.Model):
@@ -435,6 +605,7 @@ class Quote(models.Model):
     commission_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     commission_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     provider_payout = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    reminded_at = models.DateTimeField(null=True, blank=True, help_text="Relance du client envoyée (réponse ou paiement).")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
