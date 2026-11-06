@@ -51,19 +51,10 @@ export default defineConfig({
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 },
             },
           },
-          {
-            // Photos/médias uploadés (salles, prestataires, événements...) : rarement
-            // modifiés après publication, donc servis depuis le cache en priorité.
-            // Les photos d'événements privés utilisent une URL signée et ne
-            // doivent pas être conservées dans le cache partagé du service worker.
-            urlPattern: ({ url }) => url.pathname.startsWith("/media/") && !url.pathname.startsWith("/media/events/"),
-            handler: "CacheFirst",
-            options: {
-              cacheName: "innovevent-media",
-              cacheableResponse: { statuses: [0, 200] },
-              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
+          // Les photos (/media/) ne passent volontairement pas par le service
+          // worker : une coupure réseau pendant leur téléchargement y devenait
+          // une « erreur inattendue » sans nouvelle tentative. Le cache HTTP du
+          // navigateur (Cache-Control côté serveur) les gère très bien seul.
           {
             urlPattern: ({ url }) => url.origin === "https://fonts.googleapis.com" || url.origin === "https://fonts.gstatic.com",
             handler: "CacheFirst",
